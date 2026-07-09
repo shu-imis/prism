@@ -5,3 +5,5 @@ python-dotenv>=1.0
 keyring>=24
 pyqtgraph>=0.13
 WeasyPrint>=60
+pypdf>=4
+python-docx>=1.1

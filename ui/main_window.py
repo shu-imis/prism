@@ -137,12 +137,23 @@ class MainWindow(QMainWindow):
 
         self._stack = QStackedWidget()
         self._pages: dict[str, QWidget] = {}
-        self._register_page(PageKey.WELCOME, WelcomePage())
+        self.welcome_page = WelcomePage()
+        self.event_page = EventPage()
+        self.strategy_page = StrategyPage()
+        self.simulation_page = SimulationPage()
+        self.result_page = ResultPage()
+        self.welcome_page.new_project_clicked.connect(self._new_project)
+        self.welcome_page.open_project_clicked.connect(lambda: self.navigate_to(PageKey.PROJECT_LIST))
+        self.event_page.project_saved.connect(self._on_project_saved)
+        self.strategy_page.strategies_saved.connect(self._on_strategies_saved)
+        self.simulation_page.demo_completed.connect(self._show_demo_result)
+
+        self._register_page(PageKey.WELCOME, self.welcome_page)
         self._register_page(PageKey.PROJECT_LIST, ProjectListPage())
-        self._register_page(PageKey.EVENT, EventPage())
-        self._register_page(PageKey.STRATEGY, StrategyPage())
-        self._register_page(PageKey.SIMULATION, SimulationPage())
-        self._register_page(PageKey.RESULT, ResultPage())
+        self._register_page(PageKey.EVENT, self.event_page)
+        self._register_page(PageKey.STRATEGY, self.strategy_page)
+        self._register_page(PageKey.SIMULATION, self.simulation_page)
+        self._register_page(PageKey.RESULT, self.result_page)
 
         splitter.addWidget(self.sidebar)
         splitter.addWidget(self._stack)
@@ -165,6 +176,22 @@ class MainWindow(QMainWindow):
     def navigate_to(self, key: str):
         self.sidebar.set_active(key)
         self._navigate(key)
+
+    def _new_project(self):
+        self.event_page.reset_for_new_project()
+        self.navigate_to(PageKey.EVENT)
+
+    def _on_project_saved(self, project_id: int):
+        self.strategy_page.load_project(project_id)
+        self.navigate_to(PageKey.STRATEGY)
+
+    def _on_strategies_saved(self, project_id: int):
+        self.simulation_page.load_project(project_id)
+        self.navigate_to(PageKey.SIMULATION)
+
+    def _show_demo_result(self, report, results):
+        self.result_page.set_demo_result(report, results)
+        self.navigate_to(PageKey.RESULT)
 
     def _center_on_screen(self):
         screen = self.screen().availableGeometry()

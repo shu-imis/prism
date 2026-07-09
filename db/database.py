@@ -116,21 +116,23 @@ class Database:
                 CREATE TABLE IF NOT EXISTS simulations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     project_id INTEGER NOT NULL,
-                    strategy_index INTEGER NOT NULL,
+                    strategy_id INTEGER NOT NULL,
                     round INTEGER NOT NULL,
                     state_json TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                    FOREIGN KEY (strategy_id) REFERENCES strategies(id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE IF NOT EXISTS checkpoints (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     project_id INTEGER NOT NULL,
-                    strategy_index INTEGER NOT NULL,
+                    strategy_id INTEGER NOT NULL,
                     last_round INTEGER NOT NULL,
                     engine_state_json TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                    FOREIGN KEY (strategy_id) REFERENCES strategies(id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE IF NOT EXISTS reports (
@@ -144,6 +146,16 @@ class Database:
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS knowledge_chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    chunk_index INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_strategies_project_id
                     ON strategies(project_id);
                 CREATE INDEX IF NOT EXISTS idx_rounds_strategy_id
@@ -152,6 +164,8 @@ class Database:
                     ON agent_messages(round_id);
                 CREATE INDEX IF NOT EXISTS idx_reports_project_id
                     ON reports(project_id);
+                CREATE INDEX IF NOT EXISTS idx_knowledge_project_id
+                    ON knowledge_chunks(project_id);
                 """
             )
 

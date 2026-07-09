@@ -66,6 +66,7 @@ class EventDetector:
 
     def __init__(self):
         self._consecutive_cooling = 0  # 连续无事件轮次计数
+        self._regulator_mentions = 0   # 连续监管关注轮次计数
 
     def detect(
         self,
@@ -88,11 +89,13 @@ class EventDetector:
             events.append(self._make_event(state, EventType.MEDIA_FOLLOW_UP))
 
         # 2. 监管介入信号
-        if (
-            regulator_spoke
-            and any(kw in regulator_speech for kw in ["合规", "监管", "调查", "法规"])
-        ):
+        if regulator_spoke and any(kw in regulator_speech for kw in ["合规", "监管", "调查", "法规"]):
+            self._regulator_mentions += 1
+        else:
+            self._regulator_mentions = 0
+        if self._regulator_mentions >= 2:
             events.append(self._make_event(state, EventType.REGULATORY_SIGNAL))
+            self._regulator_mentions = 0
 
         # 3. 竞品借势攻击
         if state.heat > 50 and competitor_spoke:

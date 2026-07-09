@@ -76,30 +76,40 @@ class LLMClient:
         self._transport = transport
 
     @classmethod
-    def from_env(cls) -> "LLMClient":
+    def from_env(
+        cls,
+        prefer: LLMProvider = LLMProvider.OPENAI,
+        openai_key: str | None = None,
+        anthropic_key: str | None = None,
+    ) -> "LLMClient":
         """从环境变量创建客户端，自动按可用 Key 配置 fallback 顺序。"""
 
-        providers: list[ProviderSettings] = []
-        openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        oai_key = openai_key or os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
+        ant_key = anthropic_key or os.getenv("ANTHROPIC_API_KEY")
 
-        if openai_key:
-            providers.append(
-                ProviderSettings(
-                    provider=LLMProvider.OPENAI,
-                    model=os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL", app_config.llm.default_model),
-                    api_key=openai_key,
-                    base_url=os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL"),
+        preferred = [LLMProvider.OPENAI, LLMProvider.ANTHROPIC]
+        if prefer == LLMProvider.ANTHROPIC:
+            preferred.reverse()
+
+        providers: list[ProviderSettings] = []
+        for provider in preferred:
+            if provider == LLMProvider.OPENAI and oai_key:
+                providers.append(
+                    ProviderSettings(
+                        LLMProvider.OPENAI,
+                        os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL", app_config.llm.default_model),
+                        oai_key,
+                        os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL"),
+                    )
                 )
-            )
-        if anthropic_key:
-            providers.append(
-                ProviderSettings(
-                    provider=LLMProvider.ANTHROPIC,
-                    model=os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-latest"),
-                    api_key=anthropic_key,
+            if provider == LLMProvider.ANTHROPIC and ant_key:
+                providers.append(
+                    ProviderSettings(
+                        LLMProvider.ANTHROPIC,
+                        os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-latest"),
+                        ant_key,
+                    )
                 )
-            )
         if not providers:
             raise LLMError("未找到可用的 LLM API Key。请设置 OPENAI_API_KEY 或 ANTHROPIC_API_KEY。")
         return cls(providers=providers)
@@ -237,7 +247,11 @@ class LLMClient:
                     }
                 )
 
-        response = Anthropic(api_key=provider.api_key, timeout=options["timeout"]).messages.create(
+        kwargs: dict[str, Any] = {"api_key": provider.api_key, "timeout": options["timeout"]}
+        if provider.base_url:
+            kwargs["base_url"] = provider.base_url
+
+        response = Anthropic(**kwargs).messages.create(
             model=provider.model,
             system=system_prompt,
             messages=user_messages,
@@ -248,7 +262,7 @@ class LLMClient:
 
 
 class LLMClientFactory:
-    """LLM 客户端工厂。"""
+    """LLM 客户端工厂，委托 LLMClient.from_env() 创建实例。"""
 
     @staticmethod
     def create(
@@ -256,39 +270,7 @@ class LLMClientFactory:
         openai_key: str | None = None,
         anthropic_key: str | None = None,
     ) -> LLMClient:
-        providers: list[ProviderSettings] = []
-        oai_key = openai_key or os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
-        ant_key = anthropic_key or os.getenv("ANTHROPIC_API_KEY")
-
-        preferred = [
-            LLMProvider.OPENAI,
-            LLMProvider.ANTHROPIC,
-        ]
-        if prefer == LLMProvider.ANTHROPIC:
-            preferred.reverse()
-
-        for provider in preferred:
-            if provider == LLMProvider.OPENAI and oai_key:
-                providers.append(
-                    ProviderSettings(
-                        LLMProvider.OPENAI,
-                        os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL", app_config.llm.default_model),
-                        oai_key,
-                        os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL"),
-                    )
-                )
-            if provider == LLMProvider.ANTHROPIC and ant_key:
-                providers.append(
-                    ProviderSettings(
-                        LLMProvider.ANTHROPIC,
-                        os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-latest"),
-                        ant_key,
-                    )
-                )
-
-        if not providers:
-            raise LLMError("未找到可用的 LLM API Key。请设置 OPENAI_API_KEY 或 ANTHROPIC_API_KEY。")
-        return LLMClient(providers=providers)
+        return LLMClient.from_env(prefer=prefer, openai_key=openai_key, anthropic_key=anthropic_key)
 
 
 def strip_model_noise(text: str) -> str:

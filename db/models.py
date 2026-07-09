@@ -5,15 +5,11 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 from db.database import Database
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def to_json(data: Any) -> str:
@@ -103,6 +99,30 @@ class ReportRecord:
         return from_json(self.summary_json, {})
 
 
+@dataclass(frozen=True)
+class Checkpoint:
+    id: int
+    project_id: int
+    strategy_id: int
+    last_round: int
+    engine_state_json: str
+    created_at: str = ""
+
+    @property
+    def engine_state(self) -> dict[str, Any]:
+        return from_json(self.engine_state_json, {})
+
+
+@dataclass(frozen=True)
+class KnowledgeChunk:
+    id: int
+    project_id: int
+    source: str
+    chunk_index: int
+    content: str
+    created_at: str = ""
+
+
 class ProjectRepository:
     """项目数据访问。"""
 
@@ -165,6 +185,32 @@ class ProjectRepository:
                 ),
             )
 
+    def update_scenario(
+        self,
+        project_id: int,
+        scenario: dict[str, Any],
+        name: str | None = None,
+        status: str | None = None,
+    ) -> Project:
+        assignments = ["scenario_json = ?", "updated_at = datetime('now')"]
+        values: list[Any] = [to_json(scenario)]
+        if name is not None:
+            assignments.append("name = ?")
+            values.append(name)
+        if status is not None:
+            assignments.append("status = ?")
+            values.append(status)
+        values.append(project_id)
+        with self.db.transaction() as conn:
+            conn.execute(
+                f"UPDATE projects SET {', '.join(assignments)} WHERE id = ?",
+                values,
+            )
+        project = self.get_by_id(project_id)
+        if project is None:
+            raise KeyError(f"项目不存在: {project_id}")
+        return project
+
 
 class StrategyRepository:
     """策略数据访问。"""
@@ -206,6 +252,28 @@ class StrategyRepository:
             (project_id,),
         ).fetchall()
         return [Strategy(**dict(row)) for row in rows]
+
+    def replace_for_project(self, project_id: int, strategies: list[dict[str, Any]]) -> list[Strategy]:
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM strategies WHERE project_id = ?", (project_id,))
+            ids: list[int] = []
+            for strategy in strategies:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO strategies
+                        (project_id, name, statement, release_hour, meta_json, updated_at)
+                    VALUES (?, ?, ?, ?, ?, datetime('now'))
+                    """,
+                    (
+                        project_id,
+                        str(strategy.get("name", "")).strip() or "未命名策略",
+                        str(strategy.get("statement", "")).strip(),
+                        int(strategy.get("release_hour", 0)),
+                        to_json(strategy.get("meta", {})),
+                    ),
+                )
+                ids.append(int(cursor.lastrowid))
+        return [self.get_by_id(strategy_id) for strategy_id in ids]
 
 
 class SimulationRoundRepository:
@@ -339,3 +407,151 @@ class ReportRepository:
             (project_id,),
         ).fetchall()
         return [ReportRecord(**dict(row)) for row in rows]
+
+
+class CheckpointRepository:
+    """仿真检查点持久化。"""
+
+    def __init__(self, db: Database | None = None):
+        self.db = db or Database()
+
+    def save(
+        self,
+        *,
+        project_id: int,
+        strategy_id: int,
+        last_round: int,
+        engine_state: dict[str, Any],
+    ) -> int:
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                DELETE FROM checkpoints
+                WHERE project_id = ? AND strategy_id = ?
+                """,
+                (project_id, strategy_id),
+            )
+            cursor = conn.execute(
+                """
+                INSERT INTO checkpoints
+                    (project_id, strategy_id, last_round, engine_state_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (project_id, strategy_id, last_round, to_json(engine_state)),
+            )
+        return int(cursor.lastrowid)
+
+    def get_by_id(self, checkpoint_id: int) -> Checkpoint | None:
+        row = self.db.conn.execute(
+            "SELECT * FROM checkpoints WHERE id = ?",
+            (checkpoint_id,),
+        ).fetchone()
+        return Checkpoint(**dict(row)) if row else None
+
+    def latest_for_project(self, project_id: int) -> Checkpoint | None:
+        row = self.db.conn.execute(
+            """
+            SELECT * FROM checkpoints
+            WHERE project_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (project_id,),
+        ).fetchone()
+        return Checkpoint(**dict(row)) if row else None
+
+    def list_unfinished(self, limit: int = 10) -> list[Checkpoint]:
+        rows = self.db.conn.execute(
+            """
+            SELECT * FROM checkpoints
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [Checkpoint(**dict(row)) for row in rows]
+
+    def delete_for_project(self, project_id: int) -> None:
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM checkpoints WHERE project_id = ?", (project_id,))
+
+
+class KnowledgeRepository:
+    """项目 RAG 知识片段检索。"""
+
+    def __init__(self, db: Database | None = None):
+        self.db = db or Database()
+
+    def replace_for_project(self, project_id: int, chunks: list[dict[str, Any]]) -> list[KnowledgeChunk]:
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM knowledge_chunks WHERE project_id = ?", (project_id,))
+            ids: list[int] = []
+            for index, chunk in enumerate(chunks):
+                content = str(chunk.get("content", "")).strip()
+                if not content:
+                    continue
+                cursor = conn.execute(
+                    """
+                    INSERT INTO knowledge_chunks
+                        (project_id, source, chunk_index, content)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        project_id,
+                        str(chunk.get("source", "背景资料")),
+                        int(chunk.get("chunk_index", index)),
+                        content,
+                    ),
+                )
+                ids.append(int(cursor.lastrowid))
+        return [self.get_by_id(chunk_id) for chunk_id in ids]
+
+    def get_by_id(self, chunk_id: int) -> KnowledgeChunk:
+        row = self.db.conn.execute(
+            "SELECT * FROM knowledge_chunks WHERE id = ?",
+            (chunk_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"知识片段不存在: {chunk_id}")
+        return KnowledgeChunk(**dict(row))
+
+    def list_by_project(self, project_id: int) -> list[KnowledgeChunk]:
+        rows = self.db.conn.execute(
+            """
+            SELECT * FROM knowledge_chunks
+            WHERE project_id = ?
+            ORDER BY source ASC, chunk_index ASC, id ASC
+            """,
+            (project_id,),
+        ).fetchall()
+        return [KnowledgeChunk(**dict(row)) for row in rows]
+
+    def search(self, project_id: int, query: str, limit: int = 4) -> list[KnowledgeChunk]:
+        chunks = self.list_by_project(project_id)
+        terms = _query_terms(query)
+        if not terms:
+            return chunks[:limit]
+        scored: list[tuple[int, KnowledgeChunk]] = []
+        for chunk in chunks:
+            content = chunk.content.lower()
+            source = chunk.source.lower()
+            score = sum(content.count(term) * 2 + source.count(term) for term in terms)
+            if score > 0:
+                scored.append((score, chunk))
+        scored.sort(key=lambda item: (item[0], -item[1].chunk_index), reverse=True)
+        return [chunk for _, chunk in scored[:limit]]
+
+
+def _query_terms(query: str) -> list[str]:
+    raw_terms = re.findall(r"[A-Za-z0-9_\-\u4e00-\u9fff]{2,}", query.lower())
+    seen: set[str] = set()
+    terms: list[str] = []
+    for term in raw_terms:
+        candidates = [term]
+        if re.search(r"[\u4e00-\u9fff]", term) and len(term) > 4:
+            candidates.extend(term[index : index + 2] for index in range(len(term) - 1))
+        for candidate in candidates:
+            if candidate not in seen:
+                seen.add(candidate)
+                terms.append(candidate)
+    return terms[:30]
