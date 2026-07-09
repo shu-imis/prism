@@ -5,8 +5,10 @@
 """
 from __future__ import annotations
 
+import math
+
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QSize, QRectF, QPointF
+from PySide6.QtCore import Qt, QSize, QPointF
 from PySide6.QtGui import (
     QPainter,
     QColor,
@@ -14,7 +16,7 @@ from PySide6.QtGui import (
     QBrush,
     QLinearGradient,
     QPolygonF,
-    QPainterPath,
+    QRadialGradient,
 )
 
 from ui.styles import (
@@ -103,7 +105,6 @@ class PrismLogo(QWidget):
 
         colors = [SPECTRUM_INDIGO, SPECTRUM_VIOLET, SPECTRUM_CYAN, SPECTRUM_GREEN]
         # 四条光束的角度（弧度），从略向上到略向下扇形展开
-        import math
         angles = [-0.25, -0.08, 0.10, 0.28]
 
         for i, (color, angle) in enumerate(zip(colors, angles)):
@@ -124,7 +125,6 @@ class PrismLogo(QWidget):
 
         # ---- 4. 折射点微光晕 ----
         painter.setPen(Qt.NoPen)
-        from PySide6.QtGui import QRadialGradient
         glow_grad = QRadialGradient(refract_origin, 8)
         glow_grad.setColorAt(0, QColor(255, 255, 255, 120))
         glow_grad.setColorAt(1, QColor(255, 255, 255, 0))

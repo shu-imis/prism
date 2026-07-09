@@ -24,6 +24,7 @@ if env_path.exists():
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontDatabase
 
 from ui.main_window import MainWindow
 from db.database import Database
@@ -39,6 +40,16 @@ def main():
     app.setApplicationName("Prism")
     app.setApplicationVersion("0.1.0")
     app.setOrganizationName("Prism")
+
+    # 加载项目自带字体
+    _fonts_dir = Path(__file__).parent / "assets" / "fonts"
+    for _f in _fonts_dir.glob("*.ttf"):
+        if _f.name.startswith("."):
+            continue
+        _fid = QFontDatabase.addApplicationFontFromData(_f.read_bytes())
+        if _fid >= 0:
+            _families = QFontDatabase.applicationFontFamilies(_fid)
+            print(f"[Prism] font: {_families[0]}")
 
     # 初始化数据库
     try:
