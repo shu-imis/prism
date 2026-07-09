@@ -1,22 +1,24 @@
-"""多厂商 LLM 客户端
+"""多厂商 LLM 客户端。
 
-封装 OpenAI 和 Anthropic SDK，支持：
-  - 厂商 fallback（任一不可用时自动切换）
-  - 指数退避重试（最多 3 次）
-  - JSON 模式输出 + 格式修复
-  - 超时控制（默认 30s）
-
-参考 MiroFish LLMClient 的设计模式。
+封装 OpenAI-compatible 与 Anthropic 调用，提供重试、fallback、JSON
+解析修复和可测试的 transport hook。SDK 采用延迟导入，未配置 API Key
+时不会影响本地数据库、报告和 UI 基础流程。
 """
 from __future__ import annotations
 
 import json
-import time
+import os
 import re
+import time
+from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Any
+from typing import Any, Callable, Mapping, Sequence
 
-from prism.config import app_config
+from config import app_config
+
+
+Message = Mapping[str, str]
+Transport = Callable[["ProviderSettings", Sequence[Message], dict[str, Any]], str]
 
 
 class LLMProvider(str, Enum):
@@ -24,45 +26,83 @@ class LLMProvider(str, Enum):
     ANTHROPIC = "anthropic"
 
 
+@dataclass(frozen=True)
+class ProviderSettings:
+    """单个模型厂商的运行配置。"""
+
+    provider: LLMProvider
+    model: str
+    api_key: str | None = None
+    base_url: str | None = None
+
+
+class LLMError(RuntimeError):
+    """所有模型厂商均不可用时抛出。"""
+
+    def __init__(self, message: str, failures: list[str] | None = None):
+        super().__init__(message)
+        self.failures = failures or []
+
+
 class LLMClient:
-    """多厂商 LLM 客户端"""
+    """支持多厂商 fallback 的轻量 LLM 适配器。"""
 
     def __init__(
         self,
-        provider: LLMProvider = LLMProvider.OPENAI,
+        provider: LLMProvider | None = None,
         model: str | None = None,
         api_key: str | None = None,
         temperature: float | None = None,
         max_retries: int | None = None,
         timeout: int | None = None,
+        providers: Sequence[ProviderSettings] | None = None,
+        transport: Transport | None = None,
+        retry_base_seconds: float = 0.4,
     ):
-        self.provider = provider
-        self.model = model or app_config.llm.default_model
-        self.api_key = api_key
-        self.temperature = temperature or app_config.llm.temperature
-        self.max_retries = max_retries or app_config.llm.max_retries
-        self.timeout = timeout or app_config.llm.request_timeout
-        self._client: Any = None
+        self.providers = list(providers or [])
+        if not self.providers:
+            self.providers = [
+                ProviderSettings(
+                    provider=provider or LLMProvider.OPENAI,
+                    model=model or app_config.llm.default_model,
+                    api_key=api_key,
+                    base_url=os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL"),
+                )
+            ]
+        self.temperature = app_config.llm.temperature if temperature is None else temperature
+        self.max_retries = app_config.llm.max_retries if max_retries is None else max_retries
+        self.timeout = app_config.llm.request_timeout if timeout is None else timeout
+        self.retry_base_seconds = retry_base_seconds
+        self._transport = transport
 
-    def _get_client(self):
-        """延迟初始化客户端"""
-        if self._client is not None:
-            return self._client
+    @classmethod
+    def from_env(cls) -> "LLMClient":
+        """从环境变量创建客户端，自动按可用 Key 配置 fallback 顺序。"""
 
-        if self.provider == LLMProvider.OPENAI:
-            try:
-                from openai import OpenAI
-                self._client = OpenAI(api_key=self.api_key, timeout=self.timeout)
-            except ImportError:
-                raise ImportError("openai 包未安装。运行: pip install openai")
-        elif self.provider == LLMProvider.ANTHROPIC:
-            try:
-                from anthropic import Anthropic
-                self._client = Anthropic(api_key=self.api_key, timeout=self.timeout)
-            except ImportError:
-                raise ImportError("anthropic 包未安装。运行: pip install anthropic")
+        providers: list[ProviderSettings] = []
+        openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
 
-        return self._client
+        if openai_key:
+            providers.append(
+                ProviderSettings(
+                    provider=LLMProvider.OPENAI,
+                    model=os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL", app_config.llm.default_model),
+                    api_key=openai_key,
+                    base_url=os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL"),
+                )
+            )
+        if anthropic_key:
+            providers.append(
+                ProviderSettings(
+                    provider=LLMProvider.ANTHROPIC,
+                    model=os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-latest"),
+                    api_key=anthropic_key,
+                )
+            )
+        if not providers:
+            raise LLMError("未找到可用的 LLM API Key。请设置 OPENAI_API_KEY 或 ANTHROPIC_API_KEY。")
+        return cls(providers=providers)
 
     def chat(
         self,
@@ -70,85 +110,145 @@ class LLMClient:
         user_message: str,
         temperature: float | None = None,
     ) -> str:
-        """发送对话请求，返回纯文本"""
-        client = self._get_client()
-        temp = temperature or self.temperature
+        """兼容旧接口：传入 system prompt 与 user message，返回纯文本。"""
 
-        for attempt in range(self.max_retries):
-            try:
-                if self.provider == LLMProvider.OPENAI:
-                    response = client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_message},
-                        ],
-                        temperature=temp,
-                    )
-                    return response.choices[0].message.content or ""
+        return self.chat_messages(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=temperature,
+        )
 
-                elif self.provider == LLMProvider.ANTHROPIC:
-                    response = client.messages.create(
-                        model=self.model,
-                        system=system_prompt,
-                        messages=[{"role": "user", "content": user_message}],
-                        temperature=temp,
-                        max_tokens=4096,
-                    )
-                    return response.content[0].text or ""
+    def chat_messages(
+        self,
+        messages: Sequence[Message],
+        *,
+        temperature: float | None = None,
+        max_tokens: int = 4096,
+        json_mode: bool = False,
+    ) -> str:
+        """按配置顺序请求模型，单厂商失败后自动切换下一厂商。"""
 
-            except Exception as e:
-                if attempt < self.max_retries - 1:
-                    wait = 2 ** attempt
-                    time.sleep(wait)
-                else:
-                    raise RuntimeError(f"LLM 调用失败（已重试 {self.max_retries} 次）: {e}")
+        options = {
+            "temperature": self.temperature if temperature is None else temperature,
+            "max_tokens": max_tokens,
+            "timeout": self.timeout,
+            "json_mode": json_mode,
+        }
+        failures: list[str] = []
 
-        return ""
+        for provider in self.providers:
+            for attempt in range(self.max_retries + 1):
+                try:
+                    if self._transport:
+                        return self._transport(provider, messages, options)
+                    return self._call_sdk(provider, messages, options)
+                except Exception as exc:  # noqa: BLE001 - 第三方 SDK 错误类型不统一
+                    failures.append(f"{provider.provider.value} attempt {attempt + 1}: {exc}")
+                    if attempt < self.max_retries:
+                        time.sleep(self.retry_base_seconds * (2**attempt))
+                    else:
+                        break
+
+        raise LLMError("所有已配置的 LLM 厂商均调用失败。", failures)
 
     def chat_json(
         self,
         system_prompt: str,
         user_message: str,
-        temperature: float | None = None,
-    ) -> dict:
-        """发送对话请求，返回解析后的 JSON dict"""
-        raw = self.chat(system_prompt, user_message, temperature)
-        return self._parse_json(raw)
+        temperature: float | None = 0.2,
+    ) -> dict[str, Any]:
+        """兼容旧接口：请求 JSON 对象并解析。"""
+
+        raw = self.chat_messages(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=temperature,
+            json_mode=True,
+        )
+        parsed = parse_json_object(raw)
+        if not isinstance(parsed, dict):
+            raise ValueError("LLM JSON 响应必须是对象。")
+        return parsed
+
+    def _call_sdk(
+        self,
+        provider: ProviderSettings,
+        messages: Sequence[Message],
+        options: dict[str, Any],
+    ) -> str:
+        if provider.provider == LLMProvider.OPENAI:
+            return self._call_openai(provider, messages, options)
+        if provider.provider == LLMProvider.ANTHROPIC:
+            return self._call_anthropic(provider, messages, options)
+        raise ValueError(f"不支持的 LLM 厂商: {provider.provider}")
 
     @staticmethod
-    def _parse_json(raw: str) -> dict:
-        """解析 LLM 返回的 JSON，尝试修复常见格式错误"""
-        # 去除 markdown 代码块包裹
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-            cleaned = re.sub(r"\s*```$", "", cleaned)
-
+    def _call_openai(
+        provider: ProviderSettings,
+        messages: Sequence[Message],
+        options: dict[str, Any],
+    ) -> str:
         try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            # 尝试修复：截取第一个完整 JSON 对象
-            brace_count = 0
-            end_idx = -1
-            for i, ch in enumerate(cleaned):
-                if ch == "{":
-                    brace_count += 1
-                elif ch == "}":
-                    brace_count -= 1
-                    if brace_count == 0:
-                        end_idx = i + 1
-                        break
-            if end_idx > 0:
-                try:
-                    return json.loads(cleaned[:end_idx])
-                except json.JSONDecodeError:
-                    pass
-            raise ValueError(f"无法解析 LLM 返回的 JSON: {raw[:200]}...")
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError("openai 包未安装。运行: pip install openai") from exc
+
+        kwargs: dict[str, Any] = {"api_key": provider.api_key, "timeout": options["timeout"]}
+        if provider.base_url:
+            kwargs["base_url"] = provider.base_url
+
+        request: dict[str, Any] = {
+            "model": provider.model,
+            "messages": list(messages),
+            "temperature": options["temperature"],
+            "max_tokens": options["max_tokens"],
+        }
+        if options.get("json_mode"):
+            request["response_format"] = {"type": "json_object"}
+
+        response = OpenAI(**kwargs).chat.completions.create(**request)
+        return strip_model_noise(response.choices[0].message.content or "")
+
+    @staticmethod
+    def _call_anthropic(
+        provider: ProviderSettings,
+        messages: Sequence[Message],
+        options: dict[str, Any],
+    ) -> str:
+        try:
+            from anthropic import Anthropic
+        except ImportError as exc:
+            raise RuntimeError("anthropic 包未安装。运行: pip install anthropic") from exc
+
+        system_prompt = ""
+        user_messages: list[dict[str, str]] = []
+        for message in messages:
+            if message.get("role") == "system":
+                system_prompt = message.get("content", "")
+            else:
+                user_messages.append(
+                    {
+                        "role": "assistant" if message.get("role") == "assistant" else "user",
+                        "content": message.get("content", ""),
+                    }
+                )
+
+        response = Anthropic(api_key=provider.api_key, timeout=options["timeout"]).messages.create(
+            model=provider.model,
+            system=system_prompt,
+            messages=user_messages,
+            temperature=options["temperature"],
+            max_tokens=options["max_tokens"],
+        )
+        return strip_model_noise("\n".join(getattr(block, "text", "") for block in response.content))
 
 
 class LLMClientFactory:
-    """LLM 客户端工厂 —— 检测可用厂商并创建客户端"""
+    """LLM 客户端工厂。"""
 
     @staticmethod
     def create(
@@ -156,23 +256,90 @@ class LLMClientFactory:
         openai_key: str | None = None,
         anthropic_key: str | None = None,
     ) -> LLMClient:
-        """创建客户端，优先使用指定厂商，不可用时 fallback"""
-        import os
-
-        oai_key = openai_key or os.getenv("OPENAI_API_KEY")
+        providers: list[ProviderSettings] = []
+        oai_key = openai_key or os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
         ant_key = anthropic_key or os.getenv("ANTHROPIC_API_KEY")
 
-        if prefer == LLMProvider.OPENAI and oai_key:
-            return LLMClient(provider=LLMProvider.OPENAI, api_key=oai_key)
-        if prefer == LLMProvider.ANTHROPIC and ant_key:
-            return LLMClient(provider=LLMProvider.ANTHROPIC, api_key=ant_key)
+        preferred = [
+            LLMProvider.OPENAI,
+            LLMProvider.ANTHROPIC,
+        ]
+        if prefer == LLMProvider.ANTHROPIC:
+            preferred.reverse()
 
-        # fallback
-        if oai_key:
-            return LLMClient(provider=LLMProvider.OPENAI, api_key=oai_key)
-        if ant_key:
-            return LLMClient(provider=LLMProvider.ANTHROPIC, api_key=ant_key)
+        for provider in preferred:
+            if provider == LLMProvider.OPENAI and oai_key:
+                providers.append(
+                    ProviderSettings(
+                        LLMProvider.OPENAI,
+                        os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL", app_config.llm.default_model),
+                        oai_key,
+                        os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL"),
+                    )
+                )
+            if provider == LLMProvider.ANTHROPIC and ant_key:
+                providers.append(
+                    ProviderSettings(
+                        LLMProvider.ANTHROPIC,
+                        os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-latest"),
+                        ant_key,
+                    )
+                )
 
-        raise RuntimeError(
-            "未找到可用的 LLM API Key。请在 .env 中设置 OPENAI_API_KEY 或 ANTHROPIC_API_KEY。"
-        )
+        if not providers:
+            raise LLMError("未找到可用的 LLM API Key。请设置 OPENAI_API_KEY 或 ANTHROPIC_API_KEY。")
+        return LLMClient(providers=providers)
+
+
+def strip_model_noise(text: str) -> str:
+    """移除常见模型思考标签和外层空白。"""
+
+    return re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+
+
+def parse_json_object(raw: str) -> Any:
+    """从模型输出中解析 JSON，兼容代码块、前后解释文字和尾逗号。"""
+
+    cleaned = strip_model_noise(raw).strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    candidate = _extract_balanced_json(cleaned)
+    if not candidate:
+        raise ValueError(f"无法从 LLM 返回中定位 JSON: {raw[:200]}...")
+
+    candidate = re.sub(r",(\s*[}\]])", r"\1", candidate)
+    return json.loads(candidate)
+
+
+def _extract_balanced_json(text: str) -> str | None:
+    starts = [idx for idx, ch in enumerate(text) if ch in "[{"]
+    for start in starts:
+        stack: list[str] = []
+        in_string = False
+        escape = False
+        for idx in range(start, len(text)):
+            ch = text[idx]
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch in "[{":
+                stack.append("]" if ch == "[" else "}")
+            elif ch in "]}":
+                if not stack or stack.pop() != ch:
+                    break
+                if not stack:
+                    return text[start : idx + 1]
+    return None

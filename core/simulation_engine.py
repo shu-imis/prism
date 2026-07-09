@@ -10,11 +10,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Callable
 
-from prism.core.agent import Agent
-from prism.core.world_state import WorldState, KeyEvent
-from prism.core.events import EventDetector
-from prism.core.scenario_parser import Scenario
-from prism.config import app_config
+from core.agent import Agent
+from core.world_state import WorldState, KeyEvent
+from core.events import EventDetector
+from core.scenario_parser import Scenario
+from config import app_config
 
 
 class SimStatus(str, Enum):

@@ -4,7 +4,7 @@ Day 1 版：占位页面。
 后续迭代：2~4 种回应策略配置、声明稿、发布时间偏移、策略对比预览。
 """
 from PySide6.QtWidgets import QWidget
-from prism.ui.widgets import PlaceholderPage
+from ui.widgets import PlaceholderPage
 
 
 class StrategyPage(PlaceholderPage):

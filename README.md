@@ -74,6 +74,10 @@ prism/
     └── prism.md             # 项目规划文档
 ```
 
+## 后端模块交付
+
+后端能力直接维护在 `llm/`、`db/`、`report/` 三个既有目录中，覆盖 LLM 多厂商封装、SQLite 持久化和报告生成 / 导出。使用方式与 PR 说明见 [docs/backend_module.md](docs/backend_module.md)。
+
 ## 开发计划
 
 详见 [docs/prism.md](docs/prism.md)。

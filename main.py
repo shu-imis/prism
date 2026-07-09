@@ -5,8 +5,11 @@
 import sys
 from pathlib import Path
 
-# 确保项目根目录在 sys.path 中（支持 prism.xxx 绝对导入）
+# 确保项目根目录在 sys.path 中（支持直接从仓库目录运行）
+_APP_ROOT = Path(__file__).resolve().parent
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(_APP_ROOT))
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
@@ -22,8 +25,8 @@ if env_path.exists():
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
-from prism.ui.main_window import MainWindow
-from prism.db.database import Database
+from ui.main_window import MainWindow
+from db.database import Database
 
 
 def main():

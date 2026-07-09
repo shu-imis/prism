@@ -4,7 +4,7 @@ Day 1 版：占位页面。
 后续迭代：策略对比曲线图、雷达图、关键事件时间线、Agent 发言摘录。
 """
 from PySide6.QtWidgets import QWidget
-from prism.ui.widgets import PlaceholderPage
+from ui.widgets import PlaceholderPage
 
 
 class ResultPage(PlaceholderPage):

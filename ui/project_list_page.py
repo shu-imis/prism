@@ -4,7 +4,7 @@ Day 1 版：占位页面，展示空状态。
 后续迭代：项目列表（名称、创建时间、最近仿真状态）、快捷操作（继续/删除）。
 """
 from PySide6.QtWidgets import QWidget
-from prism.ui.widgets import PlaceholderPage
+from ui.widgets import PlaceholderPage
 
 
 class ProjectListPage(PlaceholderPage):

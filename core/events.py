@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List
-from prism.core.world_state import WorldState, KeyEvent
+from core.world_state import WorldState, KeyEvent
 
 
 class EventType(str, Enum):

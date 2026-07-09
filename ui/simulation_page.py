@@ -4,7 +4,7 @@ Day 1 版：占位页面。
 后续迭代：启动/暂停/中止控制、实时轮次进度、Agent 发言流、仿真状态展示。
 """
 from PySide6.QtWidgets import QWidget
-from prism.ui.widgets import PlaceholderPage
+from ui.widgets import PlaceholderPage
 
 
 class SimulationPage(PlaceholderPage):

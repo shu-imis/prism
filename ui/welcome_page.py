@@ -15,15 +15,15 @@ from PySide6.QtGui import (
     QFont, QColor, QPainter, QRadialGradient, QBrush,
 )
 
-from prism.ui.styles import (
+from ui.styles import (
     ACCENT, ACCENT_RGB,
     BG_SURFACE,
     TEXT_PRIMARY, TEXT_TERTIARY, TEXT_QUATERNARY,
     BORDER_SUBTLE, BORDER_DEFAULT,
     RADIUS_CARD,
 )
-from prism.ui.logo import PrismLogo
-from prism.ui.widgets import (
+from ui.logo import PrismLogo
+from ui.widgets import (
     PrismPrimaryButton, PrismSecondaryButton,
     SubtitleLabel, BodyLabel, SectionLabel,
 )

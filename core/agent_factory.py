@@ -7,7 +7,7 @@ Day 1 版：直接从模板实例化。
 from __future__ import annotations
 
 from typing import List
-from prism.core.agent import Agent, AGENT_TEMPLATES
+from core.agent import Agent, AGENT_TEMPLATES
 
 
 class AgentFactory:

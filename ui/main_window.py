@@ -16,16 +16,16 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
-from prism.ui.styles import (
+from ui.styles import (
     generate_stylesheet,
     SIDEBAR_WIDTH,
 )
-from prism.ui.welcome_page import WelcomePage
-from prism.ui.project_list_page import ProjectListPage
-from prism.ui.event_page import EventPage
-from prism.ui.strategy_page import StrategyPage
-from prism.ui.simulation_page import SimulationPage
-from prism.ui.result_page import ResultPage
+from ui.welcome_page import WelcomePage
+from ui.project_list_page import ProjectListPage
+from ui.event_page import EventPage
+from ui.strategy_page import StrategyPage
+from ui.simulation_page import SimulationPage
+from ui.result_page import ResultPage
 
 
 class PageKey:

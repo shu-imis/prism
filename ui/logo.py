@@ -17,7 +17,7 @@ from PySide6.QtGui import (
     QPainterPath,
 )
 
-from prism.ui.styles import (
+from ui.styles import (
     SPECTRUM_INDIGO,
     SPECTRUM_VIOLET,
     SPECTRUM_CYAN,

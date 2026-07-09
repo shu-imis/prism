@@ -4,7 +4,7 @@ Day 1 版：占位页面。
 后续迭代：事件标题、涉及行业、背景描述、企业声明、初始热度/情绪滑块。
 """
 from PySide6.QtWidgets import QWidget
-from prism.ui.widgets import PlaceholderPage
+from ui.widgets import PlaceholderPage
 
 
 class EventPage(PlaceholderPage):
