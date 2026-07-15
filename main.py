@@ -24,7 +24,7 @@ if env_path.exists():
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFontDatabase, QIcon
 
 from ui.main_window import MainWindow
 from db.database import Database
@@ -40,6 +40,11 @@ def main():
     app.setApplicationName("Prism")
     app.setApplicationVersion("0.1.0")
     app.setOrganizationName("Prism")
+
+    # 应用图标（Dock / 任务栏）
+    _icon_path = Path(__file__).parent / "assets" / "icons" / "icon.png"
+    if _icon_path.exists():
+        app.setWindowIcon(QIcon(str(_icon_path)))
 
     # 加载项目自带字体
     _fonts_dir = Path(__file__).parent / "assets" / "fonts"

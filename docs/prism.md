@@ -244,7 +244,8 @@ prism/
 ├── config.py                    # 全局配置
 ├── requirements.txt
 ├── assets/
-│   └── fonts/                   # 项目内嵌字体（Space Grotesk / JetBrains Mono / Noto Sans SC）
+│   ├── fonts/                   # 项目内嵌字体（Space Grotesk / JetBrains Mono / Noto Sans SC）
+│   └── icons/                   # 应用图标（icns / ico / png）
 ├── ui/
 │   ├── main_window.py           # 主窗口 + 侧边栏导航
 │   ├── home_page.py             # 首页 — 项目列表

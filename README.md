@@ -48,6 +48,9 @@ python main.py
 prism/
 ├── main.py
 ├── config.py
+├── assets/
+│   ├── fonts/                  # 内嵌字体
+│   └── icons/                  # 应用图标
 ├── ui/                          # PySide6 界面
 │   ├── main_window.py
 │   ├── home_page.py
