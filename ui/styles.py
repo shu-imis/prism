@@ -1,9 +1,6 @@
-"""Prism 设计系统 — 桌面应用
+"""Prism 设计系统 — Sigma 风格桌面应用
 
-MiroFish 视觉语言：
-  - 白色背景 + 黑色文字 + 橙色点缀
-  - 细线边框、小圆角
-  - 等宽字体用于数据/标签
+色彩与 QSS 生成器。
 """
 # ============================================================
 # 色彩 — Sigma 风格
@@ -159,7 +156,7 @@ QComboBox::drop-down {{ border: none; width: 20px; }}
 QComboBox QAbstractItemView {{
     background: {BG_SURFACE};
     border: 1px solid {BORDER};
-    selection-background: {BG_HOVER};
+    selection-background-color: {BG_HOVER};
 }}
 
 /* ---- 滑块 ---- */

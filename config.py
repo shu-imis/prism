@@ -1,7 +1,7 @@
 """全局配置模块
 
 集中管理所有可调参数，避免硬编码分散。
-参考 MiroFish Config 模式：从环境变量加载，提供类方法验证。
+支持从环境变量加载（.env 兜底）。
 """
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from pathlib import Path
 # 路径常量
 # ============================================================
 ROOT_DIR = Path(__file__).parent
-ASSETS_DIR = ROOT_DIR / "assets"
 DB_PATH = ROOT_DIR / "prism.db"
 
 
@@ -24,11 +23,11 @@ DB_PATH = ROOT_DIR / "prism.db"
 class SimulationDefaults:
     """仿真引擎默认参数"""
     max_rounds: int = 12
-    hours_per_round: int = 4
-    agent_count: int = 8
+    hours_per_round: int = 1      # 每轮 = 1 个供应链周期
+    agent_count: int = 7
     min_strategies: int = 2
     max_strategies: int = 4
-    round_timeout: int = 120  # 单轮最大耗时（秒）
+    round_timeout: int = 120     # 单轮最大耗时（秒）
     checkpoint_interval: int = 1  # 每 N 轮保存检查点
 
 
@@ -52,8 +51,8 @@ class AppConfig:
         """从环境变量加载配置（.env 兜底）"""
         sim = SimulationDefaults(
             max_rounds=int(os.getenv("SIM_MAX_ROUNDS", "12")),
-            hours_per_round=int(os.getenv("SIM_HOURS_PER_ROUND", "4")),
-            agent_count=int(os.getenv("SIM_AGENT_COUNT", "8")),
+            hours_per_round=int(os.getenv("SIM_HOURS_PER_ROUND", "1")),
+            agent_count=int(os.getenv("SIM_AGENT_COUNT", "7")),
         )
         llm = LLMDefaults(
             default_model=os.getenv("LLM_DEFAULT_MODEL", "gpt-4o-mini"),

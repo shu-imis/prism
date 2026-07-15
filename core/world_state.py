@@ -1,23 +1,21 @@
 """世界状态数据模型
 
 WorldState 记录仿真的全局状态快照。
-参考 MiroFish 的 SimulationRunState 分层设计。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Dict
 
 
 @dataclass
 class AgentSnapshot:
-    """单个 Agent 在某轮的快照"""
+    """单个行为体在某轮的快照"""
     agent_id: int
-    emotion: float
-    trust: float
-    stance: str
-    spoke: bool = False            # 本轮是否发言
-    speech: str = ""               # 发言内容
+    pressure: float = 0.0           # 压力/焦虑水平 0~1
+    decision_stance: str = ""       # 决策倾向：aggressive/cautious/cooperative/defensive
+    spoke: bool = False             # 本轮是否激活
+    speech: str = ""                # 响应/发言内容
+    decision_summary: str = ""      # 本轮决策摘要
 
 
 @dataclass
@@ -25,51 +23,61 @@ class KeyEvent:
     """仿真过程中的关键事件"""
     round: int
     simulated_hour: int
-    event_type: str                # 事件类型标识
-    description: str               # 事件描述
-    heat_delta: float = 0.0
-    sentiment_delta: float = 0.0
-    trust_delta: float = 0.0
+    event_type: str                 # 事件类型标识
+    description: str                # 事件描述
+    inventory_delta: float = 0.0
+    cost_delta: float = 0.0
+    delay_delta: float = 0.0
+    service_delta: float = 0.0
+    margin_delta: float = 0.0
 
 
 @dataclass
 class WorldState:
     """仿真世界的全局状态"""
     round: int = 0
-    simulated_hour: int = 0        # 累计模拟小时
-    heat: float = 0.0              # 热度（0~100）
-    sentiment: float = 0.0         # 整体情绪（-1.0 ~ 1.0）
-    support_rate: float = 0.5      # 企业支持率（0~1）
-    key_events: List[KeyEvent] = field(default_factory=list)
-    agent_states: Dict[int, AgentSnapshot] = field(default_factory=dict)
+    simulated_hour: int = 0             # 累计模拟周期
+    inventory_level: float = 75.0       # 全链库存水平 0~100
+    cost_index: float = 50.0            # 成本指数 0~100
+    delivery_delay: float = 0.0         # 平均交付延迟（周期数）
+    service_level: float = 0.85         # 订单满足率 0~1
+    profit_margin: float = 0.15         # 全链利润率 -1~1
+    resilience_score: float = 60.0      # 韧性评分 0~100
+    key_events: list[KeyEvent] = field(default_factory=list)
+    agent_states: dict[int, AgentSnapshot] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
             "round": self.round,
             "simulated_hour": self.simulated_hour,
-            "heat": self.heat,
-            "sentiment": self.sentiment,
-            "support_rate": self.support_rate,
+            "inventory_level": self.inventory_level,
+            "cost_index": self.cost_index,
+            "delivery_delay": self.delivery_delay,
+            "service_level": self.service_level,
+            "profit_margin": self.profit_margin,
+            "resilience_score": self.resilience_score,
             "key_events": [
                 {
                     "round": e.round,
                     "simulated_hour": e.simulated_hour,
                     "event_type": e.event_type,
                     "description": e.description,
-                    "heat_delta": e.heat_delta,
-                    "sentiment_delta": e.sentiment_delta,
-                    "trust_delta": e.trust_delta,
+                    "inventory_delta": e.inventory_delta,
+                    "cost_delta": e.cost_delta,
+                    "delay_delta": e.delay_delta,
+                    "service_delta": e.service_delta,
+                    "margin_delta": e.margin_delta,
                 }
                 for e in self.key_events
             ],
             "agent_states": {
                 str(aid): {
                     "agent_id": s.agent_id,
-                    "emotion": s.emotion,
-                    "trust": s.trust,
-                    "stance": s.stance,
+                    "pressure": s.pressure,
+                    "decision_stance": s.decision_stance,
                     "spoke": s.spoke,
                     "speech": s.speech,
+                    "decision_summary": s.decision_summary,
                 }
                 for aid, s in self.agent_states.items()
             },
@@ -80,15 +88,36 @@ class WorldState:
         state = cls(
             round=data["round"],
             simulated_hour=data["simulated_hour"],
-            heat=data["heat"],
-            sentiment=data["sentiment"],
-            support_rate=data["support_rate"],
+            inventory_level=data["inventory_level"],
+            cost_index=data["cost_index"],
+            delivery_delay=data["delivery_delay"],
+            service_level=data.get("service_level", 0.85),
+            profit_margin=data.get("profit_margin", 0.15),
+            resilience_score=data.get("resilience_score", 60.0),
         )
         state.key_events = [
-            KeyEvent(**e) for e in data.get("key_events", [])
+            KeyEvent(
+                round=e["round"],
+                simulated_hour=e["simulated_hour"],
+                event_type=e["event_type"],
+                description=e["description"],
+                inventory_delta=e.get("inventory_delta", 0.0),
+                cost_delta=e.get("cost_delta", 0.0),
+                delay_delta=e.get("delay_delta", 0.0),
+                service_delta=e.get("service_delta", 0.0),
+                margin_delta=e.get("margin_delta", 0.0),
+            )
+            for e in data.get("key_events", [])
         ]
         state.agent_states = {
-            int(aid): AgentSnapshot(**s)
+            int(aid): AgentSnapshot(
+                agent_id=s["agent_id"],
+                pressure=s.get("pressure", 0.0),
+                decision_stance=s.get("decision_stance", ""),
+                spoke=s.get("spoke", False),
+                speech=s.get("speech", ""),
+                decision_summary=s.get("decision_summary", ""),
+            )
             for aid, s in data.get("agent_states", {}).items()
         }
         return state

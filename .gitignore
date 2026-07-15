@@ -27,7 +27,3 @@ env/
 
 # macOS
 .DS_Store
-
-# 仿真输出
-output/
-uploads/

@@ -1,40 +1,37 @@
 """Agent 工厂
 
-从 8 个固定模板生成 Agent 实例。
-Day 1 版：直接从模板实例化。
-后续迭代：支持 LLM 动态修饰 profile（参考 MiroFish OasisProfileGenerator）。
+从 7 个固定模板生成供应链行为体实例。
 """
 from __future__ import annotations
 
-from typing import List
 from core.agent import Agent, AGENT_TEMPLATES
 
 
 class AgentFactory:
-    """Agent 工厂 —— 从预定义模板创建 Agent 实例"""
+    """Agent 工厂 —— 从预定义模板创建行为体实例"""
 
     @staticmethod
-    def create_all() -> List[Agent]:
-        """创建全部 8 个 Agent"""
-        agents: List[Agent] = []
+    def create_all() -> list[Agent]:
+        """创建全部 7 个行为体"""
+        agents: list[Agent] = []
         for tmpl in AGENT_TEMPLATES:
             agent = Agent(
                 id=tmpl["id"],
                 name=tmpl["name"],
                 role=tmpl["role"],
-                stance=tmpl["stance"],
-                base_stance=tmpl["stance"],
+                decision_stance=tmpl["decision_stance"],
+                base_stance=tmpl["decision_stance"],
                 influence=tmpl["influence"],
                 activity=tmpl["activity"],
-                active_hours=tmpl["active_hours"],
+                active_cycles=tmpl["active_cycles"],
                 profile=tmpl["profile"],
             )
             agents.append(agent)
         return agents
 
     @staticmethod
-    def create_by_ids(agent_ids: List[int]) -> List[Agent]:
-        """按 ID 创建指定 Agent"""
+    def create_by_ids(agent_ids: list[int]) -> list[Agent]:
+        """按 ID 创建指定行为体"""
         agents = []
         for tmpl in AGENT_TEMPLATES:
             if tmpl["id"] in agent_ids:
@@ -42,11 +39,11 @@ class AgentFactory:
                     id=tmpl["id"],
                     name=tmpl["name"],
                     role=tmpl["role"],
-                    stance=tmpl["stance"],
-                    base_stance=tmpl["stance"],
+                    decision_stance=tmpl["decision_stance"],
+                    base_stance=tmpl["decision_stance"],
                     influence=tmpl["influence"],
                     activity=tmpl["activity"],
-                    active_hours=tmpl["active_hours"],
+                    active_cycles=tmpl["active_cycles"],
                     profile=tmpl["profile"],
                 )
                 agents.append(agent)
@@ -54,7 +51,7 @@ class AgentFactory:
 
     @staticmethod
     def get_template(agent_id: int) -> dict | None:
-        """获取指定 ID 的 Agent 模板"""
+        """获取指定 ID 的行为体模板"""
         for tmpl in AGENT_TEMPLATES:
             if tmpl["id"] == agent_id:
                 return tmpl

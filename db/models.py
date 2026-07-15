@@ -55,15 +55,16 @@ class Strategy:
     id: int
     project_id: int
     name: str
-    statement: str
-    release_hour: int
-    meta_json: str = "{}"
+    actor: str = ""                      # 涉及行为体
+    decision: str = ""                   # 决策内容
+    release_cycle: str = ""              # 生效周期（如 "1-4"）
+    parameters_json: str = "{}"          # 决策参数 JSON
     created_at: str = ""
     updated_at: str = ""
 
     @property
-    def meta(self) -> dict[str, Any]:
-        return from_json(self.meta_json, {})
+    def parameters(self) -> dict[str, Any]:
+        return from_json(self.parameters_json, {})
 
 
 @dataclass(frozen=True)
@@ -73,10 +74,13 @@ class SimulationRound:
     strategy_id: int
     round_index: int
     simulated_hour: int
-    heat: float
-    sentiment: float
-    support_rate: float
-    state_json: str
+    inventory_level: float = 0.0         # 全链库存水平 0~100
+    cost_index: float = 0.0              # 成本指数 0~100
+    delivery_delay: float = 0.0          # 平均交付延迟（周期数）
+    service_level: float = 0.0           # 订单满足率 0~1
+    profit_margin: float = 0.0           # 全链利润率 -1~1
+    resilience_score: float = 0.0        # 韧性评分 0~100
+    state_json: str = "{}"
     created_at: str = ""
 
     @property
@@ -222,18 +226,19 @@ class StrategyRepository:
         self,
         project_id: int,
         name: str,
-        statement: str,
-        release_hour: int = 0,
-        meta: dict[str, Any] | None = None,
+        actor: str = "",
+        decision: str = "",
+        release_cycle: str = "",
+        parameters: dict[str, Any] | None = None,
     ) -> Strategy:
         with self.db.transaction() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO strategies
-                    (project_id, name, statement, release_hour, meta_json, updated_at)
-                VALUES (?, ?, ?, ?, ?, datetime('now'))
+                    (project_id, name, actor, decision, release_cycle, parameters_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
                 """,
-                (project_id, name, statement, release_hour, to_json(meta or {})),
+                (project_id, name, actor, decision, release_cycle, to_json(parameters or {})),
             )
         return self.get_by_id(int(cursor.lastrowid))
 
@@ -261,15 +266,16 @@ class StrategyRepository:
                 cursor = conn.execute(
                     """
                     INSERT INTO strategies
-                        (project_id, name, statement, release_hour, meta_json, updated_at)
-                    VALUES (?, ?, ?, ?, ?, datetime('now'))
+                        (project_id, name, actor, decision, release_cycle, parameters_json, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
                     """,
                     (
                         project_id,
-                        str(strategy.get("name", "")).strip() or "未命名策略",
-                        str(strategy.get("statement", "")).strip(),
-                        int(strategy.get("release_hour", 0)),
-                        to_json(strategy.get("meta", {})),
+                        str(strategy.get("name", "")).strip() or "未命名方案",
+                        str(strategy.get("actor", "")).strip(),
+                        str(strategy.get("decision", "")).strip(),
+                        str(strategy.get("release_cycle", "")),
+                        to_json(strategy.get("parameters", {})),
                     ),
                 )
                 ids.append(int(cursor.lastrowid))
@@ -289,9 +295,12 @@ class SimulationRoundRepository:
         strategy_id: int,
         round_index: int,
         simulated_hour: int,
-        heat: float,
-        sentiment: float,
-        support_rate: float,
+        inventory_level: float,
+        cost_index: float,
+        delivery_delay: float,
+        service_level: float = 0.0,
+        profit_margin: float = 0.0,
+        resilience_score: float = 0.0,
         state: dict[str, Any],
         agent_messages: list[dict[str, Any]] | None = None,
     ) -> SimulationRound:
@@ -299,14 +308,17 @@ class SimulationRoundRepository:
             conn.execute(
                 """
                 INSERT INTO simulation_rounds
-                    (project_id, strategy_id, round_index, simulated_hour, heat,
-                     sentiment, support_rate, state_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (project_id, strategy_id, round_index, simulated_hour, inventory_level,
+                     cost_index, delivery_delay, service_level, profit_margin, resilience_score, state_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(strategy_id, round_index) DO UPDATE SET
                     simulated_hour = excluded.simulated_hour,
-                    heat = excluded.heat,
-                    sentiment = excluded.sentiment,
-                    support_rate = excluded.support_rate,
+                    inventory_level = excluded.inventory_level,
+                    cost_index = excluded.cost_index,
+                    delivery_delay = excluded.delivery_delay,
+                    service_level = excluded.service_level,
+                    profit_margin = excluded.profit_margin,
+                    resilience_score = excluded.resilience_score,
                     state_json = excluded.state_json
                 """,
                 (
@@ -314,9 +326,12 @@ class SimulationRoundRepository:
                     strategy_id,
                     round_index,
                     simulated_hour,
-                    heat,
-                    sentiment,
-                    support_rate,
+                    inventory_level,
+                    cost_index,
+                    delivery_delay,
+                    service_level,
+                    profit_margin,
+                    resilience_score,
                     to_json(state),
                 ),
             )

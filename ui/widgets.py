@@ -69,7 +69,9 @@ class Input(QLineEdit):
 class Title(QLabel):
     def __init__(self, text="", size=18, parent=None):
         super().__init__(text, parent)
-        f = QFont(); f.setPointSize(size); f.setBold(True)
+        f = QFont()
+        f.setPointSize(size)
+        f.setBold(True)
         self.setFont(f)
         self.setStyleSheet(f"color: {TEXT_PRIMARY};")
 
@@ -78,7 +80,8 @@ class Subtitle(QLabel):
     def __init__(self, text="", parent=None):
         super().__init__(text, parent)
         self.setWordWrap(True)
-        f = QFont(); f.setPointSize(13)
+        f = QFont()
+        f.setPointSize(13)
         self.setFont(f)
         self.setStyleSheet(f"color: {TEXT_SECONDARY};")
 
@@ -87,7 +90,8 @@ class Caption(QLabel):
     def __init__(self, text="", parent=None):
         super().__init__(text, parent)
         self.setWordWrap(True)
-        f = QFont(); f.setPointSize(11)
+        f = QFont()
+        f.setPointSize(11)
         self.setFont(f)
         self.setStyleSheet(f"color: {TEXT_MUTED};")
 
@@ -97,7 +101,8 @@ class MonoLabel(QLabel):
     def __init__(self, text="", parent=None):
         super().__init__(text, parent)
         f = QFont("JetBrains Mono")
-        f.setPointSize(12); f.setBold(True)
+        f.setPointSize(12)
+        f.setBold(True)
         self.setFont(f)
         self.setStyleSheet(f"color: {TEXT_PRIMARY};")
 

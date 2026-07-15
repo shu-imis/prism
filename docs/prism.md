@@ -254,8 +254,7 @@ prism/
 │   ├── simulation_page.py       # 仿真运行（Step 03）
 │   ├── result_page.py           # 结果分析（Step 04）
 │   ├── widgets.py               # 可复用组件
-│   ├── styles.py                # 色彩常量 + QSS 生成
-│   └── logo.py                  # 品牌图形
+│   └── styles.py                # 色彩常量 + QSS 生成
 ├── core/
 │   ├── agent.py                 # 行为体数据类 + 模板
 │   ├── agent_factory.py         # 行为体工厂

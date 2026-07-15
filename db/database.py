@@ -78,9 +78,10 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     project_id INTEGER NOT NULL,
                     name TEXT NOT NULL,
-                    statement TEXT NOT NULL,
-                    release_hour INTEGER NOT NULL DEFAULT 0,
-                    meta_json TEXT NOT NULL DEFAULT '{}',
+                    actor TEXT NOT NULL DEFAULT '',
+                    decision TEXT NOT NULL DEFAULT '',
+                    release_cycle TEXT NOT NULL DEFAULT '',
+                    parameters_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -92,10 +93,13 @@ class Database:
                     strategy_id INTEGER NOT NULL,
                     round_index INTEGER NOT NULL,
                     simulated_hour INTEGER NOT NULL,
-                    heat REAL NOT NULL,
-                    sentiment REAL NOT NULL,
-                    support_rate REAL NOT NULL,
-                    state_json TEXT NOT NULL,
+                    inventory_level REAL NOT NULL DEFAULT 0,
+                    cost_index REAL NOT NULL DEFAULT 0,
+                    delivery_delay REAL NOT NULL DEFAULT 0,
+                    service_level REAL NOT NULL DEFAULT 0,
+                    profit_margin REAL NOT NULL DEFAULT 0,
+                    resilience_score REAL NOT NULL DEFAULT 0,
+                    state_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     UNIQUE(strategy_id, round_index),
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -111,17 +115,6 @@ class Database:
                     metrics_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     FOREIGN KEY (round_id) REFERENCES simulation_rounds(id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS simulations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id INTEGER NOT NULL,
-                    strategy_id INTEGER NOT NULL,
-                    round INTEGER NOT NULL,
-                    state_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                    FOREIGN KEY (strategy_id) REFERENCES strategies(id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE IF NOT EXISTS checkpoints (

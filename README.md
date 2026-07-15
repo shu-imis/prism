@@ -37,8 +37,7 @@ prism/
 │   ├── simulation_page.py     # 仿真运行（Step 03）
 │   ├── result_page.py         # 结果分析（Step 04）
 │   ├── widgets.py
-│   ├── styles.py              # 设计系统（Sigma 亮色主题）
-│   └── logo.py
+│   └── styles.py              # 设计系统（Sigma 亮色主题）
 ├── core/
 │   ├── agent.py               # 行为体数据类 + 模板
 │   ├── agent_factory.py

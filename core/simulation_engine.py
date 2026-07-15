@@ -1,4 +1,4 @@
-"""仿真引擎 —— 真实 LLM 多智能体主循环。"""
+"""仿真引擎 —— 真实 LLM 多行为体主循环。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,9 +12,10 @@ from core.agent import Agent
 from core.events import EventDetector
 from core.scenario_parser import Scenario
 from core.world_state import AgentSnapshot, WorldState
+from core import clamp, clamp_float
 from db.models import Checkpoint, CheckpointRepository, KnowledgeRepository, SimulationRoundRepository
 from llm.client import LLMClient
-from llm.prompts import AGENT_RESPONSE_SYSTEM, OFFICIAL_SPEECH_SYSTEM
+from llm.prompts import AGENT_RESPONSE_SYSTEM
 
 
 class SimStatus(str, Enum):
@@ -33,7 +34,7 @@ class SimulationConfig:
     """单次仿真的运行配置。"""
 
     max_rounds: int = 12
-    hours_per_round: int = 4
+    cycles_per_round: int = 1
     strategies: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -61,19 +62,22 @@ class SimulationState:
 
 @dataclass
 class AgentTurn:
-    """单个 Agent 在一轮中的 LLM 输出。"""
+    """单个行为体在一轮中的 LLM 输出。"""
 
     agent_id: int
     agent_name: str
     role: str
-    stance: str
+    decision_stance: str
     speech: str
-    emotion_change: float = 0.0
-    trust_change: float = 0.0
-    spread_intent: float = 0.0
-    stance_shift: str = "none"
-    tone: str = ""
-    is_official: bool = False
+    inventory_change: float = 0.0
+    cost_change: float = 0.0
+    delay_change: float = 0.0
+    service_change: float = 0.0
+    margin_change: float = 0.0
+    pressure_change: float = 0.0
+    decision_shift: str = "none"
+    risk_description: str = ""
+    response_summary: str = ""
     skipped: bool = False
     error_message: str = ""
     warning: str = ""
@@ -83,15 +87,18 @@ class AgentTurn:
             "agent_id": self.agent_id,
             "agent_name": self.agent_name,
             "role": self.role,
-            "stance": self.stance,
+            "decision_stance": self.decision_stance,
             "content": self.speech,
             "metrics": {
-                "emotion_change": self.emotion_change,
-                "trust_change": self.trust_change,
-                "spread_intent": self.spread_intent,
-                "stance_shift": self.stance_shift,
-                "tone": self.tone,
-                "is_official": self.is_official,
+                "inventory_change": self.inventory_change,
+                "cost_change": self.cost_change,
+                "delay_change": self.delay_change,
+                "service_change": self.service_change,
+                "margin_change": self.margin_change,
+                "pressure_change": self.pressure_change,
+                "decision_shift": self.decision_shift,
+                "risk_description": self.risk_description,
+                "response_summary": self.response_summary,
                 "skipped": self.skipped,
                 "error_message": self.error_message,
                 "warning": self.warning,
@@ -107,7 +114,7 @@ class SimulationRecoverableError(RuntimeError):
 
 
 class SimulationEngine:
-    """管理多策略、多轮、多 Agent 的真实 LLM 推演生命周期。"""
+    """管理多方案、多轮、多行为体的真实 LLM 推演生命周期。"""
 
     def __init__(self, llm_client: LLMClient | None = None, random_seed: int = 42):
         self.state = SimulationState()
@@ -137,7 +144,7 @@ class SimulationEngine:
 
         self.state.config = SimulationConfig(
             max_rounds=max_rounds or app_config.sim.max_rounds,
-            hours_per_round=app_config.sim.hours_per_round,
+            cycles_per_round=1,
             strategies=strategies,
         )
         self.state.agents = agents
@@ -157,21 +164,19 @@ class SimulationEngine:
 
     def set_progress_callback(self, callback: Callable[[int, int, str], None]) -> None:
         """设置进度回调 —— 用于 UI 更新。"""
-
         self._progress_callback = callback
 
     def set_round_callback(self, callback: RoundCallback) -> None:
-        """设置轮次回调 —— 用于 UI 展示每轮状态和 Agent 发言。"""
-
+        """设置轮次回调 —— 用于 UI 展示每轮状态和行为体响应。"""
         self._round_callback = callback
 
     def run(self) -> list[list[WorldState]]:
         """运行完整仿真（同步模式，UI 应放在线程中调用）。"""
 
         if not self.state.config.strategies:
-            raise ValueError("至少需要配置一个回应策略。")
+            raise ValueError("至少需要配置一个决策方案。")
         if not self.state.agents:
-            raise ValueError("至少需要配置一个 Agent。")
+            raise ValueError("至少需要配置一个行为体。")
 
         self.state.status = SimStatus.RUNNING
         self.state.strategy_results = self._resume_strategy_results()
@@ -202,39 +207,31 @@ class SimulationEngine:
         return self.state.strategy_results
 
     def _run_strategy_simulation(self, strategy_index: int, strategy: dict[str, Any]) -> list[WorldState]:
-        hours_per_round = self.state.config.hours_per_round
         max_rounds = self.state.config.max_rounds
         detector = EventDetector()
         resume = self._resume_for_strategy(strategy_index)
         if resume:
             agents = [Agent.from_dict(item) for item in resume.get("agents", [])]
             rounds = [WorldState.from_dict(item) for item in resume.get("current_rounds", [])]
-            official_released = bool(resume.get("official_released", False))
             start_round = int(resume.get("last_round", 0)) + 1
             ws = rounds[-1] if rounds else self._initial_world_state(agents)
         else:
             agents = self._clone_agents()
-            official_released = False
             rounds = [self._initial_world_state(agents)]
             ws = rounds[0]
             start_round = 1
             self._persist_round(strategy_index, ws, [])
-            self._save_checkpoint(strategy_index, ws, agents, official_released, rounds)
+            self._save_checkpoint(strategy_index, ws, agents, rounds)
 
         for round_index in range(start_round, max_rounds + 1):
             self._wait_if_paused()
             if self.state.status == SimStatus.ABORTED:
-                self._save_checkpoint(strategy_index, ws, agents, official_released, rounds)
+                self._save_checkpoint(strategy_index, ws, agents, rounds)
                 break
 
             round_started = time.monotonic()
-            simulated_hour = round_index * hours_per_round
-            active_agents = self._select_active_agents(agents, simulated_hour)
-            release_hour = int(self._strategy_value(strategy, "release_hour", 4))
-            official_agent = self._official_agent(agents)
-            if official_agent and not official_released and simulated_hour >= release_hour:
-                active_agents.append(official_agent)
-                official_released = True
+            simulated_hour = round_index  # 每轮 = 1 个供应链周期
+            active_agents = self._select_active_agents(agents, round_index)
 
             turns: list[AgentTurn] = []
             for agent in active_agents:
@@ -242,17 +239,28 @@ class SimulationEngine:
                 if self.state.status == SimStatus.ABORTED:
                     break
                 if time.monotonic() - round_started > self.state.round_timeout:
-                    turns.append(self._skipped_turn(agent, "本轮超过最大耗时，已跳过剩余 Agent。", warning="round_timeout"))
+                    turns.append(self._skipped_turn(agent, "本轮超过最大耗时，已跳过剩余行为体。", warning="round_timeout"))
                     continue
                 try:
-                    if agent.id == 8:
-                        turn = self._generate_official_turn(agent, ws, strategy)
-                    else:
-                        turn = self._generate_agent_turn(agent, ws, strategy)
+                    turn = self._generate_agent_turn(agent, ws, strategy)
                     self._apply_agent_turn(agent, turn)
                 except Exception as exc:  # noqa: BLE001 - LLM SDK 错误类型不统一
                     turn = self._skipped_turn(agent, str(exc))
                 turns.append(turn)
+
+            # 事件检测参数推导
+            supplier_delayed = any(
+                t.agent_id == 1 and t.delay_change > 0.5 and not t.skipped for t in turns
+            )
+            retailer_margin_negative = any(
+                t.agent_id == 4 and t.margin_change < 0 and not t.skipped for t in turns
+            )
+            regulator_risk_flagged = any(
+                t.agent_id == 7 and "风险" in t.risk_description and not t.skipped for t in turns
+            )
+            demand_surge_detected = any(
+                t.agent_id == 6 and t.inventory_change < -8 and not t.skipped for t in turns
+            )
 
             next_state = self._build_next_state(
                 previous=ws,
@@ -263,25 +271,24 @@ class SimulationEngine:
             )
             events = detector.detect(
                 next_state,
-                kol_spoke=any(t.agent_id == 4 and not t.skipped for t in turns),
-                kol_speech="\n".join(t.speech for t in turns if t.agent_id == 4 and not t.skipped),
-                regulator_spoke=any(t.agent_id == 6 and not t.skipped for t in turns),
-                regulator_speech="\n".join(t.speech for t in turns if t.agent_id == 6 and not t.skipped),
-                competitor_spoke=any(t.agent_id == 7 and not t.skipped for t in turns),
+                supplier_delayed=supplier_delayed,
+                retailer_margin_negative=retailer_margin_negative,
+                regulator_risk_flagged=regulator_risk_flagged,
+                demand_surge_detected=demand_surge_detected,
             )
             self._apply_events(next_state, agents, events)
-            self._apply_group_dynamics(agents)
+            self._apply_bullwhip_effect(agents)
             self._propagate_memory(agents, turns)
 
             rounds.append(next_state)
             ws = next_state
             messages = [turn.to_message() for turn in turns]
             self._persist_round(strategy_index, ws, messages)
-            self._save_checkpoint(strategy_index, ws, agents, official_released, rounds)
+            self._save_checkpoint(strategy_index, ws, agents, rounds)
             self._emit_callbacks(strategy_index, strategy, ws, messages)
             if active_agents and all(turn.skipped for turn in turns):
                 raise SimulationRecoverableError(
-                    f"策略 {strategy_index + 1} 第 {round_index} 轮所有激活 Agent 均调用失败或超时，已保存检查点。"
+                    f"方案 {strategy_index + 1} 第 {round_index} 轮所有激活行为体均调用失败或超时，已保存检查点。"
                 )
 
         return rounds
@@ -292,12 +299,16 @@ class SimulationEngine:
         return self.llm_client
 
     def _initial_world_state(self, agents: list[Agent]) -> WorldState:
+        sc = self.state.scenario
         return WorldState(
             round=0,
             simulated_hour=0,
-            heat=self.state.scenario.initial_heat if self.state.scenario else 0.0,
-            sentiment=self.state.scenario.baseline_sentiment if self.state.scenario else 0.0,
-            support_rate=0.5,
+            inventory_level=sc.initial_inventory if sc else 75.0,
+            cost_index=sc.baseline_cost if sc else 50.0,
+            delivery_delay=0.0,
+            service_level=sc.baseline_service_level if sc else 0.85,
+            profit_margin=0.15,
+            resilience_score=60.0,
             agent_states=self._snapshot_all(agents),
         )
 
@@ -326,7 +337,6 @@ class SimulationEngine:
         strategy_index: int,
         state: WorldState,
         agents: list[Agent],
-        official_released: bool,
         current_rounds: list[WorldState],
     ) -> None:
         repo = self.state.checkpoint_repository
@@ -341,7 +351,6 @@ class SimulationEngine:
         engine_state = {
             "strategy_index": strategy_index,
             "last_round": state.round,
-            "official_released": official_released,
             "agents": [agent.to_dict() for agent in agents],
             "current_rounds": [round_state.to_dict() for round_state in current_rounds],
             "strategy_results": strategy_results,
@@ -370,7 +379,7 @@ class SimulationEngine:
             agent_id=agent.id,
             agent_name=agent.name,
             role=agent.role,
-            stance=agent.stance,
+            decision_stance=agent.decision_stance,
             speech="",
             skipped=True,
             error_message=error_message,
@@ -381,22 +390,23 @@ class SimulationEngine:
         scenario = self.state.scenario or Scenario()
         system_prompt = AGENT_RESPONSE_SYSTEM.format(
             agent_profile=agent.profile,
-            simulated_hour=state.simulated_hour,
-            heat=f"{state.heat:.1f}",
-            sentiment=f"{state.sentiment:.2f}",
-            support_rate=f"{state.support_rate:.1%}",
-            emotion=f"{agent.emotion:.2f}",
-            trust=f"{agent.trust:.2f}",
+            cycle=state.simulated_hour,
+            inventory_level=state.inventory_level,
+            cost_index=state.cost_index,
+            delivery_delay=state.delivery_delay,
+            service_level=state.service_level,
+            profit_margin=state.profit_margin,
+            pressure=agent.pressure,
+            capacity=agent.capacity,
             recent_events=self._format_recent_events(state),
             memory="\n".join(agent.memory[-5:]) or "暂无",
         )
         user_message = (
-            f"事件标题：{scenario.title}\n"
+            f"供应链名称：{scenario.title}\n"
             f"行业：{scenario.industry}\n"
-            f"事件背景：{scenario.background}\n"
-            f"企业现有声明：{scenario.company_statement or '暂无'}\n"
-            f"当前策略：{self._strategy_value(strategy, 'name', '未命名策略')}\n"
-            f"策略声明稿：{self._strategy_value(strategy, 'statement', '')}\n"
+            f"供应链背景：{scenario.background}\n"
+            f"当前决策方案：{self._strategy_value(strategy, 'name', '未命名方案')}\n"
+            f"决策内容：{self._strategy_value(strategy, 'decision', '')}\n"
             f"相关背景资料片段：\n{self._retrieve_knowledge_context(agent, state, strategy)}\n"
             "请只返回 JSON 对象。"
         )
@@ -405,46 +415,17 @@ class SimulationEngine:
             agent_id=agent.id,
             agent_name=agent.name,
             role=agent.role,
-            stance=agent.stance,
-            speech=str(data.get("speech", "")).strip(),
-            emotion_change=_clamp_float(data.get("emotion_change", 0.0), -0.3, 0.3),
-            trust_change=_clamp_float(data.get("trust_change", 0.0), -0.2, 0.2),
-            spread_intent=_clamp_float(data.get("spread_intent", 0.2), 0.0, 1.0),
-            stance_shift=str(data.get("stance_shift", "none")),
-        )
-
-    def _generate_official_turn(self, agent: Agent, state: WorldState, strategy: dict[str, Any]) -> AgentTurn:
-        statement = str(self._strategy_value(strategy, "statement", ""))
-        system_prompt = OFFICIAL_SPEECH_SYSTEM.format(
-            company_statement=statement,
-            simulated_hour=state.simulated_hour,
-            heat=f"{state.heat:.1f}",
-            sentiment=f"{state.sentiment:.2f}",
-        )
-        scenario = self.state.scenario or Scenario()
-        user_message = (
-            f"事件标题：{scenario.title}\n"
-            f"事件背景：{scenario.background}\n"
-            f"相关背景资料片段：\n{self._retrieve_knowledge_context(agent, state, strategy)}\n"
-            "请只返回 JSON 对象。"
-        )
-        data = self._ensure_llm_client().chat_json(system_prompt, user_message, temperature=0.2)
-        tone = str(data.get("tone", "transparent"))
-        trust_change = 0.12 if tone in {"apologetic", "conciliatory", "transparent"} else -0.04
-        emotion_change = 0.08 if tone in {"apologetic", "conciliatory", "transparent"} else -0.03
-        spread_intent = 0.45 if tone in {"transparent", "assertive"} else 0.30
-        return AgentTurn(
-            agent_id=agent.id,
-            agent_name=agent.name,
-            role=agent.role,
-            stance=agent.stance,
-            speech=str(data.get("speech", statement)).strip(),
-            emotion_change=emotion_change,
-            trust_change=trust_change,
-            spread_intent=spread_intent,
-            stance_shift="toward_supportive",
-            tone=tone,
-            is_official=True,
+            decision_stance=agent.decision_stance,
+            speech=str(data.get("response_summary", "")).strip(),
+            inventory_change=clamp_float(data.get("inventory_change", 0.0), -20.0, 20.0),
+            cost_change=clamp_float(data.get("cost_change", 0.0), -10.0, 15.0),
+            delay_change=clamp_float(data.get("delay_change", 0.0), -1.0, 2.0),
+            service_change=clamp_float(data.get("service_change", 0.0), -0.1, 0.1),
+            margin_change=clamp_float(data.get("margin_change", 0.0), -0.08, 0.08),
+            pressure_change=clamp_float(data.get("pressure_change", 0.0), -0.2, 0.2),
+            decision_shift=str(data.get("decision_shift", "none")),
+            risk_description=str(data.get("risk_description", "")).strip(),
+            response_summary=str(data.get("response_summary", "")).strip(),
         )
 
     def _build_next_state(
@@ -456,109 +437,134 @@ class SimulationEngine:
         round_index: int,
         simulated_hour: int,
     ) -> WorldState:
-        weighted_emotion = _weighted_average([(agent.emotion, agent.influence) for agent in agents], previous.sentiment)
-        weighted_trust = _weighted_average([(agent.trust, agent.influence) for agent in agents], previous.support_rate)
-        non_official_heat = sum(
-            self._agent_by_id(agents, turn.agent_id).influence * turn.spread_intent * self._spread_multiplier(turn)
-            for turn in turns
-            if not turn.is_official and not turn.skipped
+        # 按影响力权重聚合各行为体的指标变化
+        weighted_inventory = sum(
+            self._agent_by_id(agents, t.agent_id).influence * t.inventory_change
+            for t in turns if not t.skipped
         )
-        official_adjust = sum(self._official_heat_adjust(turn) for turn in turns if turn.is_official)
-        quiet_cooling = -1.2 if not turns else 0.0
-        heat = _clamp(previous.heat + non_official_heat + official_adjust + quiet_cooling, 0.0, 100.0)
-        sentiment = _clamp(previous.sentiment * 0.55 + weighted_emotion * 0.45, -1.0, 1.0)
-        support_rate = _clamp(previous.support_rate * 0.65 + weighted_trust * 0.35, 0.0, 1.0)
+        weighted_cost = sum(
+            self._agent_by_id(agents, t.agent_id).influence * t.cost_change
+            for t in turns if not t.skipped
+        )
+        weighted_delay = sum(
+            self._agent_by_id(agents, t.agent_id).influence * t.delay_change
+            for t in turns if not t.skipped
+        )
+        weighted_service = sum(
+            self._agent_by_id(agents, t.agent_id).influence * t.service_change
+            for t in turns if not t.skipped
+        )
+        weighted_margin = sum(
+            self._agent_by_id(agents, t.agent_id).influence * t.margin_change
+            for t in turns if not t.skipped
+        )
+
+        total_influence = sum(self._agent_by_id(agents, t.agent_id).influence for t in turns if not t.skipped) or 1.0
+
+        quiet_recovery = 0.0
+        if not turns:
+            quiet_recovery = 1.0  # 安静轮次微幅恢复
+
+        inventory_level = clamp(previous.inventory_level + weighted_inventory / total_influence + quiet_recovery, 0.0, 100.0)
+        cost_index = clamp(previous.cost_index + weighted_cost / total_influence, 0.0, 100.0)
+        delivery_delay = max(0.0, previous.delivery_delay + weighted_delay / total_influence)
+        service_level = clamp(previous.service_level + weighted_service / total_influence, 0.0, 1.0)
+        profit_margin = clamp(previous.profit_margin + weighted_margin / total_influence, -1.0, 1.0)
+        resilience_score = clamp(
+            60.0
+            - (cost_index - 50) * 0.3
+            - delivery_delay * 5
+            + service_level * 20
+            + profit_margin * 30,
+            0.0, 100.0,
+        )
 
         snapshots = self._snapshot_all(agents)
         for turn in turns:
             agent = self._agent_by_id(agents, turn.agent_id)
             snapshots[agent.id] = AgentSnapshot(
                 agent_id=agent.id,
-                emotion=agent.emotion,
-                trust=agent.trust,
-                stance=agent.stance,
+                pressure=agent.pressure,
+                decision_stance=agent.decision_stance,
                 spoke=not turn.skipped,
                 speech=turn.speech if not turn.skipped else f"跳过：{turn.error_message[:120]}",
+                decision_summary=turn.response_summary if not turn.skipped else "",
             )
 
         return WorldState(
             round=round_index,
             simulated_hour=simulated_hour,
-            heat=heat,
-            sentiment=sentiment,
-            support_rate=support_rate,
+            inventory_level=inventory_level,
+            cost_index=cost_index,
+            delivery_delay=delivery_delay,
+            service_level=service_level,
+            profit_margin=profit_margin,
+            resilience_score=resilience_score,
             agent_states=snapshots,
         )
 
     def _apply_events(self, state: WorldState, agents: list[Agent], events) -> None:
         state.key_events = events
         for event in events:
-            state.heat = _clamp(state.heat + event.heat_delta, 0.0, 100.0)
-            state.sentiment = _clamp(state.sentiment + event.sentiment_delta, -1.0, 1.0)
-            state.support_rate = _clamp(state.support_rate + event.trust_delta, 0.0, 1.0)
-            if event.trust_delta:
-                for agent in agents:
-                    agent.trust = _clamp(agent.trust + event.trust_delta, 0.0, 1.0)
+            state.inventory_level = clamp(state.inventory_level + event.inventory_delta, 0.0, 100.0)
+            state.cost_index = clamp(state.cost_index + event.cost_delta, 0.0, 100.0)
+            state.delivery_delay = max(0.0, state.delivery_delay + event.delay_delta)
+            state.service_level = clamp(state.service_level + event.service_delta, 0.0, 1.0)
+            state.profit_margin = clamp(state.profit_margin + event.margin_delta, -1.0, 1.0)
 
     def _apply_agent_turn(self, agent: Agent, turn: AgentTurn) -> None:
         if turn.skipped:
             return
-        agent.emotion = _clamp(agent.emotion + turn.emotion_change, -1.0, 1.0)
-        agent.trust = _clamp(agent.trust + turn.trust_change, 0.0, 1.0)
-        if turn.stance_shift == "toward_opposing":
-            agent.stance = _shift_stance(agent.stance, toward="opposing")
-        elif turn.stance_shift == "toward_supportive":
-            agent.stance = _shift_stance(agent.stance, toward="supportive")
+        agent.pressure = clamp(agent.pressure + turn.pressure_change, 0.0, 1.0)
+        agent.capacity = clamp(agent.capacity + turn.inventory_change * 0.005, 0.3, 1.5)
+        if turn.decision_shift in ("toward_aggressive", "toward_cautious",
+                                    "toward_cooperative", "toward_defensive"):
+            agent.decision_stance = turn.decision_shift.replace("toward_", "")
 
-    def _select_active_agents(self, agents: list[Agent], simulated_hour: int) -> list[Agent]:
-        start = simulated_hour - self.state.config.hours_per_round
-        window = {(start + offset) % 24 for offset in range(self.state.config.hours_per_round)}
+    def _select_active_agents(self, agents: list[Agent], cycle: int) -> list[Agent]:
+        """根据活跃周期选择本轮参与的行为体。"""
         active: list[Agent] = []
         for agent in agents:
-            if agent.id == 8:
-                continue
-            active_hours = set(agent.active_hours or range(24))
-            if window.intersection(active_hours) and self._rng.random() <= agent.activity:
+            active_cycles = set(agent.active_cycles or range(1, 13))
+            if cycle in active_cycles and self._rng.random() <= agent.activity:
                 active.append(agent)
         return active
 
     def _propagate_memory(self, agents: list[Agent], turns: list[AgentTurn]) -> None:
+        """传播高影响力行为的记忆。"""
         influential = [
             turn
             for turn in turns
             if (
                 not turn.skipped
-                and turn.speech
-                and (turn.spread_intent >= 0.6 or self._agent_by_id(agents, turn.agent_id).influence >= 1.5)
+                and turn.response_summary
+                and self._agent_by_id(agents, turn.agent_id).influence >= 1.5
             )
         ]
         for agent in agents:
             for turn in influential:
                 if turn.agent_id == agent.id:
                     continue
-                source = "KOL 二次扩散" if turn.agent_id == 4 else turn.agent_name
+                source = turn.agent_name
                 influence = self._agent_by_id(agents, turn.agent_id).influence
-                agent.memory.append(f"{source}｜影响力 {influence:.1f}: {turn.speech[:90]}")
+                agent.memory.append(f"{source}｜影响力 {influence:.1f}: {turn.response_summary[:90]}")
             agent.memory = agent.memory[-5:]
 
-    def _apply_group_dynamics(self, agents: list[Agent]) -> None:
-        opposing = [agent for agent in agents if agent.stance == "opposing"]
-        neutral = [agent for agent in agents if agent.stance == "neutral"]
-        if not opposing or not neutral:
+    def _apply_bullwhip_effect(self, agents: list[Agent]) -> None:
+        """牛鞭效应：上游行为体的波动被逐级放大。"""
+        # 找到下游行为体（零售商、消费者）的 pressure 水平
+        downstream = [a for a in agents if a.decision_stance == "aggressive"]
+        if not downstream:
             return
-        negative_ratio = sum(1 for agent in opposing if agent.emotion <= -0.35) / len(opposing)
-        if negative_ratio < 0.6:
+        avg_downstream_pressure = sum(a.pressure for a in downstream) / len(downstream)
+        if avg_downstream_pressure < 0.5:
             return
-        for agent in neutral:
-            if self._rng.random() < 0.35:
-                agent.stance = "opposing"
-                agent.trust = _clamp(agent.trust - 0.08, 0.0, 1.0)
-
-    @staticmethod
-    def _spread_multiplier(turn: AgentTurn) -> float:
-        if turn.agent_id == 4:
-            return 2.35  # 基础 2.2 + KOL 二次传播约 0.15
-        return 2.2
+        # 向上游传播压力
+        upstream = [a for a in agents if a.decision_stance in ("cautious", "cooperative")]
+        for agent in upstream:
+            if self._rng.random() < 0.3:
+                agent.pressure = clamp(agent.pressure + avg_downstream_pressure * 0.15, 0.0, 1.0)
+                agent.capacity = clamp(agent.capacity - 0.03, 0.3, 1.5)
 
     def _persist_round(self, strategy_index: int, state: WorldState, messages: list[dict[str, Any]]) -> None:
         repo = self.state.round_repository
@@ -571,9 +577,12 @@ class SimulationEngine:
             strategy_id=strategy_id,
             round_index=state.round,
             simulated_hour=state.simulated_hour,
-            heat=state.heat,
-            sentiment=state.sentiment,
-            support_rate=state.support_rate,
+            inventory_level=state.inventory_level,
+            cost_index=state.cost_index,
+            delivery_delay=state.delivery_delay,
+            service_level=state.service_level,
+            profit_margin=state.profit_margin,
+            resilience_score=state.resilience_score,
             state=state.to_dict(),
             agent_messages=messages,
         )
@@ -591,7 +600,7 @@ class SimulationEngine:
             self._progress_callback(
                 current,
                 total,
-                f"策略 {strategy_index + 1} · 第 {state.round}/{self.state.config.max_rounds} 轮",
+                f"方案 {strategy_index + 1} · 第 {state.round}/{self.state.config.max_rounds} 轮",
             )
         if self._round_callback:
             self._round_callback(strategy_index, strategy, state, messages)
@@ -604,16 +613,11 @@ class SimulationEngine:
         return {
             agent.id: AgentSnapshot(
                 agent_id=agent.id,
-                emotion=agent.emotion,
-                trust=agent.trust,
-                stance=agent.stance,
+                pressure=agent.pressure,
+                decision_stance=agent.decision_stance,
             )
             for agent in agents
         }
-
-    @staticmethod
-    def _official_agent(agents: list[Agent]) -> Agent | None:
-        return next((agent for agent in agents if agent.id == 8), None)
 
     @staticmethod
     def _agent_by_id(agents: list[Agent], agent_id: int) -> Agent:
@@ -649,9 +653,8 @@ class SimulationEngine:
                 scenario.industry,
                 scenario.background[:800],
                 self._strategy_value(strategy, "name", ""),
-                self._strategy_value(strategy, "statement", "")[:800],
+                self._strategy_value(strategy, "decision", "")[:800],
                 agent.role,
-                agent.stance,
                 self._format_recent_events(state),
             ]
         )
@@ -663,56 +666,24 @@ class SimulationEngine:
             for chunk in chunks
         )
 
-    @staticmethod
-    def _official_heat_adjust(turn: AgentTurn) -> float:
-        if turn.tone in {"apologetic", "conciliatory", "transparent"}:
-            return -4.0
-        if turn.tone in {"defensive", "assertive"}:
-            return 2.0
-        return -1.0
-
     def abort(self) -> None:
         """中止仿真。"""
-
         self.state.status = SimStatus.ABORTED
 
     def pause(self) -> None:
-        """暂停仿真。同步 demo 模式下仅标记状态。"""
-
+        """暂停仿真。"""
         if self.state.status == SimStatus.RUNNING:
             self.state.status = SimStatus.PAUSED
 
     def resume(self) -> None:
         """恢复仿真。"""
-
         if self.state.status == SimStatus.PAUSED:
             self.state.status = SimStatus.RUNNING
 
 
 def _weighted_average(values: list[tuple[float, float]], fallback: float) -> float:
+    """加权平均工具函数。"""
     total_weight = sum(weight for _, weight in values)
     if total_weight <= 0:
         return fallback
     return sum(value * weight for value, weight in values) / total_weight
-
-
-def _shift_stance(current: str, *, toward: str) -> str:
-    if toward == "opposing":
-        if current == "supportive":
-            return "neutral"
-        return "opposing"
-    if current == "opposing":
-        return "neutral"
-    return "supportive"
-
-
-def _clamp(value: float, lower: float, upper: float) -> float:
-    return max(lower, min(upper, value))
-
-
-def _clamp_float(value: Any, lower: float, upper: float) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        parsed = 0.0
-    return _clamp(parsed, lower, upper)

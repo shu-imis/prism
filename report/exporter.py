@@ -44,39 +44,44 @@ class ReportExporter:
     @staticmethod
     def to_markdown(report: ProjectReport) -> str:
         lines = [
-            f"# {report.project_name} - 危机公关推演报告",
+            f"# {report.project_name} - 供应链决策推演报告",
             "",
             "## 执行摘要",
             report.executive_summary or "暂无摘要。",
             "",
-            "## 事件背景",
+            "## 供应链背景",
             report.scenario_background or "未填写。",
             "",
-            "## 策略对比",
-            "| 策略 | 最终热度 | 最终情绪 | 最终支持率 | 建议 |",
-            "| --- | ---: | ---: | ---: | --- |",
+            "## 方案对比",
+            "| 方案 | 库存 | 成本 | 交付延迟 | 服务水平 | 利润率 | 韧性 | 建议 |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
         ]
         for item in report.strategy_reports:
             lines.append(
-                "| {name} | {heat:.1f} | {sentiment:.2f} | {support:.1%} | {rec} |".format(
+                "| {name} | {inv:.1f} | {cost:.1f} | {delay:.1f} | {svc:.0%} | {margin:+.1%} | {resilience:.1f} | {rec} |".format(
                     name=item.strategy_name,
-                    heat=item.final_heat,
-                    sentiment=item.final_sentiment,
-                    support=item.final_support_rate,
+                    inv=item.final_inventory,
+                    cost=item.final_cost,
+                    delay=item.final_delivery_delay,
+                    svc=item.final_service_level,
+                    margin=item.final_profit_margin,
+                    resilience=item.scores.get("风险抵御", 0),
                     rec=item.recommendation,
                 )
             )
 
-        lines.extend(["", "## 分策略分析"])
+        lines.extend(["", "## 分方案分析"])
         for item in report.strategy_reports:
             lines.extend(
                 [
                     "",
                     f"### {item.strategy_name}",
-                    f"- 声明稿：{item.strategy_statement or '未填写'}",
-                    f"- 热度变化：{item.heat_delta:+.1f}",
-                    f"- 情绪变化：{item.sentiment_delta:+.2f}",
-                    f"- 支持率变化：{item.support_delta:+.1%}",
+                    f"- 决策内容：{item.strategy_decision or '未填写'}",
+                    f"- 库存变化：{item.inventory_delta:+.1f}",
+                    f"- 成本变化：{item.cost_delta:+.1f}",
+                    f"- 交付延迟变化：{item.delay_delta:+.1f} 周期",
+                    f"- 服务水平变化：{item.service_delta:+.2f}",
+                    f"- 利润率变化：{item.margin_delta:+.1%}",
                     "- 六维评分：" + "；".join(f"{key} {value:.1f}" for key, value in item.scores.items()),
                     "- 关键风险：" + ("；".join(item.risks) if item.risks else "暂无明显高风险信号"),
                     "- 关键事件：" + ("；".join(item.key_events) if item.key_events else "无"),

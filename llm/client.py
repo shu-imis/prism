@@ -261,18 +261,6 @@ class LLMClient:
         return strip_model_noise("\n".join(getattr(block, "text", "") for block in response.content))
 
 
-class LLMClientFactory:
-    """LLM 客户端工厂，委托 LLMClient.from_env() 创建实例。"""
-
-    @staticmethod
-    def create(
-        prefer: LLMProvider = LLMProvider.OPENAI,
-        openai_key: str | None = None,
-        anthropic_key: str | None = None,
-    ) -> LLMClient:
-        return LLMClient.from_env(prefer=prefer, openai_key=openai_key, anthropic_key=anthropic_key)
-
-
 def strip_model_noise(text: str) -> str:
     """移除常见模型思考标签和外层空白。"""
 
