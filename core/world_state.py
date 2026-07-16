@@ -19,6 +19,20 @@ class AgentSnapshot:
 
 
 @dataclass
+class NodeState:
+    """供应链节点的细粒度状态"""
+    name: str
+    node_type: str
+    inventory: float = 0.0
+    capacity: float = 0.0
+    lead_time: float = 0.0
+    cost_index: float = 50.0
+    service_level: float = 0.85
+    profit_margin: float = 0.15
+    resilience_score: float = 60.0
+
+
+@dataclass
 class KeyEvent:
     """仿真过程中的关键事件"""
     round: int
@@ -30,6 +44,14 @@ class KeyEvent:
     delay_delta: float = 0.0
     service_delta: float = 0.0
     margin_delta: float = 0.0
+
+    @property
+    def cycle(self) -> int:
+        return self.simulated_hour
+
+    @cycle.setter
+    def cycle(self, value: int) -> None:
+        self.simulated_hour = int(value)
 
 
 @dataclass
@@ -45,10 +67,20 @@ class WorldState:
     resilience_score: float = 60.0      # 韧性评分 0~100
     key_events: list[KeyEvent] = field(default_factory=list)
     agent_states: dict[int, AgentSnapshot] = field(default_factory=dict)
+    node_states: list[NodeState] = field(default_factory=list)
+
+    @property
+    def cycle(self) -> int:
+        return self.simulated_hour
+
+    @cycle.setter
+    def cycle(self, value: int) -> None:
+        self.simulated_hour = int(value)
 
     def to_dict(self) -> dict:
         return {
             "round": self.round,
+            "cycle": self.cycle,
             "simulated_hour": self.simulated_hour,
             "inventory_level": self.inventory_level,
             "cost_index": self.cost_index,
@@ -81,13 +113,28 @@ class WorldState:
                 }
                 for aid, s in self.agent_states.items()
             },
+            "node_states": [
+                {
+                    "name": node.name,
+                    "node_type": node.node_type,
+                    "inventory": node.inventory,
+                    "capacity": node.capacity,
+                    "lead_time": node.lead_time,
+                    "cost_index": node.cost_index,
+                    "service_level": node.service_level,
+                    "profit_margin": node.profit_margin,
+                    "resilience_score": node.resilience_score,
+                }
+                for node in self.node_states
+            ],
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> WorldState:
+        cycle = data.get("cycle", data.get("simulated_hour", 0))
         state = cls(
             round=data["round"],
-            simulated_hour=data["simulated_hour"],
+            simulated_hour=cycle,
             inventory_level=data["inventory_level"],
             cost_index=data["cost_index"],
             delivery_delay=data["delivery_delay"],
@@ -120,4 +167,18 @@ class WorldState:
             )
             for aid, s in data.get("agent_states", {}).items()
         }
+        state.node_states = [
+            NodeState(
+                name=node.get("name", ""),
+                node_type=node.get("node_type", node.get("type", "")),
+                inventory=node.get("inventory", 0.0),
+                capacity=node.get("capacity", 0.0),
+                lead_time=node.get("lead_time", 0.0),
+                cost_index=node.get("cost_index", 50.0),
+                service_level=node.get("service_level", 0.85),
+                profit_margin=node.get("profit_margin", 0.15),
+                resilience_score=node.get("resilience_score", 60.0),
+            )
+            for node in data.get("node_states", [])
+        ]
         return state

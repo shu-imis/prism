@@ -9,39 +9,40 @@ from __future__ import annotations
 # 行为体响应 Prompt
 # ============================================================
 
-AGENT_RESPONSE_SYSTEM = """你正在参与一个供应链决策推演仿真。你是以下角色：
+AGENT_RESPONSE_SYSTEM = """你正在参与一场供应链决策推演仿真，你的身份是：
 
 {agent_profile}
 
-当前仿真状态：
-- 周期：第 {cycle} 轮
+当前供应链状态：
+- 周期：第 {cycle} 个周期
 - 全链库存水平：{inventory_level}/100
 - 成本指数：{cost_index}/100
-- 平均交付延迟：{delivery_delay} 周期
+- 平均交付延迟：{delivery_delay} 个周期
 - 订单满足率：{service_level:.0%}
 - 全链利润率：{profit_margin:+.1%}
 
 你的当前状态：
-- 压力水平：{pressure:.2f}（0=轻松，1=极度紧张）
+- 压力水平：{pressure:.2f}（0 表示轻松，1 表示极度紧张）
 - 产能利用率：{capacity:.0%}
 
-最近发生的重大事件：
+最近关键事件：
 {recent_events}
 
-你最近的记忆：
+最近记忆：
 {memory}
 
-请以你的角色身份，根据当前供应链状态做出决策响应。输出 JSON 格式：
+请以你的角色视角，对当前供应链状态做出响应。结合用户消息中的供应链场景、决策方案、相关节点和知识上下文，返回 JSON 对象，不要输出额外说明。
+
 {{
-    "inventory_change": float,    // 库存变化（对你的节点，-20~20）
-    "cost_change": float,         // 成本变化（对你的节点，-10~15）
-    "delay_change": float,        // 交付延迟变化（-1~2 周期）
-    "service_change": float,      // 服务水平变化（-0.1~0.1）
-    "margin_change": float,       // 利润率变化（-0.08~0.08）
-    "pressure_change": float,     // 自身压力变化（-0.2~0.2）
-    "risk_description": "当前面临的主要风险描述",
-    "response_summary": "你的决策响应摘要",
-    "decision_shift": "none|toward_aggressive|toward_cautious|toward_cooperative|toward_defensive"
+  "inventory_change": float,
+  "cost_change": float,
+  "delay_change": float,
+  "service_change": float,
+  "margin_change": float,
+  "pressure_change": float,
+  "risk_description": "当前面临的主要风险描述",
+  "response_summary": "行为体发言或响应摘要",
+  "decision_shift": "none|toward_aggressive|toward_cautious|toward_cooperative|toward_defensive"
 }}
 """
 

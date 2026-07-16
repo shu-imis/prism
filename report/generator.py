@@ -10,6 +10,21 @@ from typing import Any
 
 from core.world_state import WorldState
 from core import clamp
+from llm.client import LLMClient  # 预留：LLM 方案评估
+from llm.prompts import (  # 预留：LLM 评估 prompt
+    REPORT_GENERATION_SYSTEM,
+    STRATEGY_EVALUATION_SYSTEM,
+)
+
+# 预留：LLM 评分维度中英文映射
+SCORE_DIMENSION_MAP: dict[str, str] = {
+    "成本控制": "cost_control",
+    "交付稳定性": "delivery_stability",
+    "库存健康度": "inventory_health",
+    "风险抵御": "risk_resistance",
+    "协同效率": "collaboration_efficiency",
+    "可执行性": "executability",
+}
 
 
 @dataclass
@@ -83,11 +98,13 @@ class ProjectReport:
 class ReportGenerator:
     """报告生成器。"""
 
-    def __init__(self, project_name: str = "", scenario_background: str = ""):
+    def __init__(self, project_name: str = "", scenario_background: str = "", llm_client: LLMClient | None = None, use_llm: bool = False):
         self.report = ProjectReport(
             project_name=project_name,
             scenario_background=scenario_background,
         )
+        self.llm_client = llm_client
+        self.use_llm = use_llm
 
     def add_strategy_result(
         self,

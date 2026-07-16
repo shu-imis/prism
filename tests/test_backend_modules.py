@@ -422,7 +422,7 @@ class BackendModuleTests(unittest.TestCase):
         engine.configure(
             self._always_active_agents(),
             ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
-            [{"name": "激进补货", "actor": "零售商", "decision": "增加安全库存。", "release_cycle": "1-6"}],
+            [{"name": "激进补货", "actor": "", "decision": "增加安全库存。", "release_cycle": "1-6"}],
             max_rounds=1,
         )
 
