@@ -3,7 +3,6 @@ import json
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -14,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from db.models import ProjectRepository, StrategyRepository
+from db.models import StrategyRepository
 from ui.styles import *
 from ui.widgets import (
     Caption,
@@ -73,7 +72,7 @@ class StrategyPage(QWidget):
 
         inner = QWidget()
         self._il = QVBoxLayout(inner)
-        self._il.setContentsMargins(0, 0, PAD_XL, 0)
+        self._il.setContentsMargins(0, 0, 0, 0)
         self._il.setSpacing(PAD_SM)
 
         card = Card()
@@ -97,11 +96,6 @@ class StrategyPage(QWidget):
         br.addWidget(self._save_btn)
         self._il.addLayout(br)
 
-        self._err = QLabel("")
-        self._err.setStyleSheet(f"color:{COLOR_RED};font-size:12px;")
-        self._err.setVisible(False)
-        self._il.addWidget(self._err)
-
         scroll.setWidget(inner)
         layout.addWidget(scroll)
 
@@ -122,18 +116,46 @@ class StrategyPage(QWidget):
         card.add_layout(hdr)
 
         card.add(QLabel("方案名称"))
-        nm = Input(d.get("name", ""))
+        nm = Input("如：激进补货方案")
+        nm.setText(str(d.get("name", "")))
         card.add(nm)
 
         card.add(QLabel("涉及行为体"))
-        ac = QComboBox()
-        ac.setEditable(True)
-        ac.addItems([
+        actor_row = QHBoxLayout()
+        ACTOR_TYPES = [
             "原材料供应商", "制造商", "分销商", "零售商",
             "物流服务商", "消费者", "监管机构",
-        ])
-        ac.setCurrentText(d.get("actor", ""))
-        card.add(ac)
+        ]
+        selected_actor = {"val": d.get("actor", "")}
+        actor_widgets = []
+        for label in ACTOR_TYPES:
+            lbl = QLabel(label)
+            lbl.setCursor(Qt.PointingHandCursor)
+            lbl.setFixedHeight(BTN_H)
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.mousePressEvent = (
+                lambda e, v=label, s=selected_actor, ws=actor_widgets:
+                _select_actor(v, s, ws)
+            )
+            actor_widgets.append((label, lbl))
+            actor_row.addWidget(lbl)
+
+        def _select_actor(v, s, ws):
+            s["val"] = v
+            for tv, w in ws:
+                if tv == v:
+                    w.setStyleSheet(
+                        f"background:{TEXT_PRIMARY};color:{TEXT_ON_DARK};"
+                        "padding:2px 10px;font-size:12px;"
+                    )
+                else:
+                    w.setStyleSheet(
+                        f"background:transparent;color:{TEXT_MUTED};"
+                        "padding:2px 10px;font-size:12px;"
+                    )
+        _select_actor(selected_actor["val"], selected_actor, actor_widgets)
+        actor_row.addStretch()
+        card.add_layout(actor_row)
 
         card.add(QLabel("决策内容"))
         st = QTextEdit()
@@ -161,7 +183,7 @@ class StrategyPage(QWidget):
         self._cards.append({
             "card": card,
             "name": nm,
-            "actor": ac,
+            "actor": selected_actor,
             "decision": st,
             "release_cycle": rp,
             "parameters": pr,
@@ -215,27 +237,23 @@ class StrategyPage(QWidget):
             return
 
         if len(self._cards) < 2:
-            self._err.setText("至少需要配置2种决策方案")
-            self._err.setVisible(True)
+            self.log("至少需要 2 种决策方案", is_error=True)
             return
 
         if len(self._cards) > 4:
-            self._err.setText("最多只能配置4种决策方案")
-            self._err.setVisible(True)
+            self.log("最多只能配置 4 种决策方案", is_error=True)
             return
 
         data = []
         for cd in self._cards:
             name = cd["name"].text().strip()
             if not name:
-                self._err.setText("请填写所有方案名称")
-                self._err.setVisible(True)
+                self.log("请填写所有方案名称", is_error=True)
                 return
 
             decision = cd["decision"].toPlainText().strip()
             if not decision:
-                self._err.setText("请填写所有方案的决策内容")
-                self._err.setVisible(True)
+                self.log("请填写所有方案的决策内容", is_error=True)
                 return
 
             try:
@@ -244,12 +262,11 @@ class StrategyPage(QWidget):
                 params = {}
             data.append({
                 "name": name,
-                "actor": cd["actor"].currentText(),
+                "actor": cd["actor"]["val"],
                 "decision": decision,
                 "release_cycle": cd["release_cycle"].text().strip(),
                 "parameters": params,
             })
 
-        self._err.setVisible(False)
         StrategyRepository().replace_for_project(self._pid, data)
         self.strategies_saved.emit(self._pid)

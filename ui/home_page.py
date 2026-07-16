@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from ui.styles import *
-from ui.widgets import Card, Title, Caption, PrimaryBtn, StatusDot
+from ui.widgets import Title, Caption, PrimaryBtn, StatusDot
 from db.models import ProjectRepository
 
 _STATUS_COLORS = {"draft": COLOR_ORANGE, "running": COLOR_BLUE, "completed": COLOR_GREEN}

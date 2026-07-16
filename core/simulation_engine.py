@@ -616,7 +616,7 @@ class SimulationEngine:
             agent.decision_stance = turn.decision_shift.replace("toward_", "")
 
     def _select_active_agents(self, agents: list[Agent], cycle: int, strategy: dict[str, Any]) -> list[Agent]:
-        """根据活跃周期和策略过滤选择本轮参与的行为体。"""
+        """根据活跃周期和方案过滤选择本轮参与的行为体。"""
         release_cycles = self._strategy_release_cycles(strategy)
         if release_cycles is not None and cycle not in release_cycles:
             return []

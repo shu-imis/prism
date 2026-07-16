@@ -3,11 +3,10 @@ import os
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QProgressBar,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QTextEdit,
@@ -15,12 +14,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import app_config
+from config import app_config, DB_PATH
 from core.agent_factory import AgentFactory
 from core.scenario_parser import ScenarioParser
-from core.simulation_engine import SimulationEngine
+from core.simulation_engine import SimulationEngine, SimulationRecoverableError
 from db.database import Database
-from db.models import ProjectRepository, StrategyRepository
+from db.models import CheckpointRepository, ProjectRepository, SimulationRoundRepository, StrategyRepository
 from llm.client import LLMClient, LLMProvider, ProviderSettings
 from report.generator import ReportGenerator
 from ui.styles import *
@@ -30,17 +29,18 @@ from ui.widgets import (
     GhostBtn,
     Input,
     PrimaryBtn,
+    ProgressBar,
     SecondaryBtn,
     Title,
 )
 
 PRESETS = [
-    {"label": "OpenAI", "proto": "openai", "url": "", "model": app_config.llm.default_model},
-    {"label": "Anthropic", "proto": "anthropic", "url": "", "model": "claude-3-5-haiku-latest"},
-    {"label": "DeepSeek", "proto": "openai", "url": "https://api.deepseek.com/v1", "model": "deepseek-chat"},
-    {"label": "通义千问", "proto": "openai", "url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen-plus"},
-    {"label": "Kimi", "proto": "openai", "url": "https://api.moonshot.cn/v1", "model": "moonshot-v1-8k"},
-    {"label": "智谱", "proto": "openai", "url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-4-flash"},
+    {"label": "OpenAI", "proto": "openai", "url": "https://api.openai.com/v1", "model": "gpt-5.6-sol"},
+    {"label": "Anthropic", "proto": "anthropic", "url": "https://api.anthropic.com", "model": "claude-fable-5"},
+    {"label": "DeepSeek", "proto": "openai", "url": "https://api.deepseek.com", "model": "deepseek-v4-pro"},
+    {"label": "通义千问", "proto": "openai", "url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen3.7-max"},
+    {"label": "Kimi", "proto": "openai", "url": "https://api.moonshot.cn/v1", "model": "kimi-k2.7-code"},
+    {"label": "智谱", "proto": "openai", "url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-5.2"},
     {"label": "自定义", "proto": "openai", "url": "", "model": ""},
 ]
 
@@ -50,6 +50,7 @@ class SimWorker(QThread):
     round_done = Signal(dict)
     finished = Signal(object, list)
     failed = Signal(str)
+    recoverable = Signal(str)      # 中断但可恢复
 
     def __init__(self, pid, proto, key, url, model, rounds):
         super().__init__()
@@ -60,6 +61,10 @@ class SimWorker(QThread):
         self.model = model
         self.rounds = rounds
         self._paused = False
+        self._checkpoint = None
+
+    def set_checkpoint(self, checkpoint):
+        self._checkpoint = checkpoint
 
     def pause(self):
         self._paused = True
@@ -69,7 +74,7 @@ class SimWorker(QThread):
 
     def run(self):
         try:
-            db = Database()
+            db = Database(DB_PATH)
             if self.proto == "openai":
                 ps = ProviderSettings(
                     LLMProvider.OPENAI, self.model,
@@ -97,10 +102,21 @@ class SimWorker(QThread):
                 }
                 for s in sl
             ]
+            strategy_records = list(sl)
+            round_repo = SimulationRoundRepository(db)
+            checkpoint_repo = CheckpointRepository(db)
 
             agents = AgentFactory.create_all()
             engine = SimulationEngine(llm)
-            engine.configure(agents, sc, strategies, max_rounds=self.rounds)
+            engine.configure(
+                agents, sc, strategies,
+                max_rounds=self.rounds,
+                project_id=self.pid,
+                strategy_records=strategy_records,
+                round_repository=round_repo,
+                checkpoint_repository=checkpoint_repo,
+                resume_checkpoint=self._checkpoint,
+            )
             engine.set_progress_callback(
                 lambda c, t, m: self.progress.emit(c, t, m)
             )
@@ -130,6 +146,8 @@ class SimWorker(QThread):
                 gen.add_strategy_result(nm, dc, sr)
 
             self.finished.emit(gen.generate(), results)
+        except SimulationRecoverableError as e:
+            self.recoverable.emit(str(e))
         except Exception as e:
             self.failed.emit(str(e))
 
@@ -157,17 +175,49 @@ class SimulationPage(QWidget):
 
         inner = QWidget()
         il = QVBoxLayout(inner)
-        il.setContentsMargins(0, 0, PAD_XL, 0)
+        il.setContentsMargins(0, 0, 0, 0)
         il.setSpacing(PAD_SM)
 
         # --- LLM 配置 ---
         cfg = Card()
         cfg.add(Title("LLM 配置", 13))
 
-        self._prov = QComboBox()
-        for p in PRESETS:
-            self._prov.addItem(p["label"], p)
-        self._prov.currentIndexChanged.connect(self._apply_preset)
+        self._provider_index = 0
+        provider_row = QHBoxLayout()
+        provider_row.setSpacing(0)
+
+        self._prov_minus = QPushButton("<")
+        self._prov_minus.setFixedSize(BTN_H, BTN_H)
+        self._prov_minus.setCursor(Qt.PointingHandCursor)
+        self._prov_minus.setStyleSheet(
+            f"QPushButton{{background:{BG_SURFACE};border:1px solid {BORDER};border-right:none;font-size:13px;color:{TEXT_PRIMARY};}}"
+            f"QPushButton:hover{{background:{BG_HOVER};}}"
+        )
+        self._prov_minus.clicked.connect(self._prev_provider)
+
+        self._provider_label = QLabel(PRESETS[0]["label"])
+        self._provider_label.setFixedHeight(BTN_H)
+        self._provider_label.setAlignment(Qt.AlignCenter)
+        self._provider_label.setStyleSheet(
+            f"QLabel{{background:{BG_INPUT};border:1px solid {BORDER};border-left:none;border-right:none;"
+            "font-family:'Space Grotesk','Noto Sans SC';"
+            f"font-size:13px;font-weight:600;color:{TEXT_PRIMARY};}}"
+        )
+
+        self._prov_plus = QPushButton(">")
+        self._prov_plus.setFixedSize(BTN_H, BTN_H)
+        self._prov_plus.setCursor(Qt.PointingHandCursor)
+        self._prov_plus.setStyleSheet(
+            f"QPushButton{{background:{BG_SURFACE};border:1px solid {BORDER};border-left:none;font-size:13px;color:{TEXT_PRIMARY};}}"
+            f"QPushButton:hover{{background:{BG_HOVER};}}"
+        )
+        self._prov_plus.clicked.connect(self._next_provider)
+
+        provider_row.addWidget(self._prov_minus)
+        provider_row.addWidget(self._provider_label, 1)
+        provider_row.addWidget(self._prov_plus)
+        provider_row.addStretch()
+        cfg.add_layout(provider_row)
 
         self._key = Input("API Key")
         self._key.setEchoMode(QLineEdit.Password)
@@ -175,11 +225,10 @@ class SimulationPage(QWidget):
         self._model = Input()
         self._model.setText(app_config.llm.default_model)
 
-        cv = QWidget()
+        self._config_widget = QWidget()
+        cv = self._config_widget
         cl = QVBoxLayout(cv)
         cl.setContentsMargins(0, 0, 0, 0)
-        cl.addWidget(QLabel("厂商"))
-        cl.addWidget(self._prov)
         cl.addWidget(QLabel("API Key"))
         cl.addWidget(self._key)
         cl.addWidget(QLabel("Base URL"))
@@ -188,9 +237,9 @@ class SimulationPage(QWidget):
         cl.addWidget(self._model)
         cfg.add(cv)
 
-        tb = GhostBtn("收起 ▲")
-        tb.clicked.connect(lambda: cv.setVisible(not cv.isVisible()))
-        cfg.add(tb)
+        self._toggle_btn = GhostBtn("收起 ▲")
+        self._toggle_btn.clicked.connect(self._toggle_config)
+        cfg.add(self._toggle_btn)
         il.addWidget(cfg)
 
         # --- 指标卡 ---
@@ -211,10 +260,11 @@ class SimulationPage(QWidget):
             mr.addWidget(c)
         il.addLayout(mr)
 
-        self._bar = QProgressBar()
+        self._bar = ProgressBar()
         il.addWidget(self._bar)
 
         self._st = Caption("")
+        self._st.setVisible(False)
         il.addWidget(self._st)
 
         self._log = QTextEdit()
@@ -235,13 +285,28 @@ class SimulationPage(QWidget):
         br.addStretch()
         il.addLayout(br)
 
-        self._err = QLabel("")
-        self._err.setStyleSheet(f"color:{COLOR_RED};font-size:12px;")
-        self._err.setVisible(False)
-        il.addWidget(self._err)
-
         scroll.setWidget(inner)
         layout.addWidget(scroll)
+
+    def _prev_provider(self):
+        self._provider_index = (self._provider_index - 1) % len(PRESETS)
+        self._update_provider()
+
+    def _next_provider(self):
+        self._provider_index = (self._provider_index + 1) % len(PRESETS)
+        self._update_provider()
+
+    def _update_provider(self):
+        p = PRESETS[self._provider_index]
+        self._provider_label.setText(p["label"])
+        self._url.setText(p.get("url", ""))
+        self._model.setText(p.get("model", ""))
+
+    def _toggle_config(self):
+        cv = self._config_widget
+        visible = not cv.isVisible()
+        cv.setVisible(visible)
+        self._toggle_btn.setText("收起 ▲" if visible else "展开 ▼")
 
     def load_project(self, pid):
         self._pid = pid
@@ -251,12 +316,6 @@ class SimulationPage(QWidget):
         self._pid = None
         self._reset()
 
-    def _apply_preset(self):
-        p = self._prov.currentData()
-        if p:
-            self._url.setText(p.get("url", ""))
-            self._model.setText(p.get("model", ""))
-
     def _toggle(self):
         if self._running:
             if self._worker:
@@ -265,7 +324,7 @@ class SimulationPage(QWidget):
             self._start.setText("▶ 继续")
             return
 
-        p = self._prov.currentData() or {}
+        p = PRESETS[self._provider_index]
         self._worker = SimWorker(
             self._pid,
             p.get("proto", "openai"),
@@ -274,16 +333,19 @@ class SimulationPage(QWidget):
             self._model.text(),
             app_config.sim.max_rounds,
         )
-        self._worker.progress.connect(
-            lambda c, t, m: (
-                self._bar.setValue(int(c / t * 100)),
-                self._st.setText(m),
-            )
-        )
+        if self._pid:
+            db = Database()
+            cp_repo = CheckpointRepository(db)
+            checkpoint = cp_repo.latest_for_project(self._pid)
+            if checkpoint:
+                self._worker.set_checkpoint(checkpoint)
+                self.log("检测到检查点，从断点恢复", is_error=False)
+        self._worker.progress.connect(self._on_progress)
         self._worker.round_done.connect(self._on_round)
         self._worker.finished.connect(
             lambda r, res: (
                 setattr(self, "_running", False),
+                self._bar.setValue(100),
                 self._start.setText("✓ 完成"),
                 self._start.setEnabled(False),
                 self.simulation_completed.emit(r, res),
@@ -292,9 +354,16 @@ class SimulationPage(QWidget):
         self._worker.failed.connect(
             lambda m: (
                 setattr(self, "_running", False),
-                self._err.setText(m),
-                self._err.setVisible(True),
+                self.log(m, is_error=True),
                 self._start.setText("▶ 重试"),
+                self._start.setEnabled(True),
+            )
+        )
+        self._worker.recoverable.connect(
+            lambda m: (
+                setattr(self, "_running", False),
+                self.log(m, is_error=True),
+                self._start.setText("↺ 恢复"),
                 self._start.setEnabled(True),
             )
         )
@@ -302,6 +371,12 @@ class SimulationPage(QWidget):
         self._running = True
         self._start.setText("⏸ 暂停")
         self._worker.start()
+
+    def _on_progress(self, current, total, message):
+        if total:
+            self._bar.setValue(int(current / total * 100))
+        self._st.setText(message)
+        self._st.setVisible(bool(message))
 
     def _on_round(self, p):
         inv = p.get("inventory", 0)
@@ -319,22 +394,26 @@ class SimulationPage(QWidget):
         self._mv["交付延迟"].setText(f"{delay:.1f}")
 
         self._log.append(
-            f"[周期{r}] 库存{inv:.0f} 成本{cost:.0f} "
-            f"服务{svc:.0%} 利润{margin:+.1%}"
+            f"  >  [周期 {r}]  库存 {inv:.0f}  成本 {cost:.0f}  "
+            f"服务 {svc:.0%}  利润 {margin:+.1%}"
         )
 
         for msg in messages:
             agent_name = msg.get("agent_name", "未知行为体")
-            content = msg.get("content", "")
-            if content:
-                self._log.append(f"  → {agent_name}: {content[:80]}...")
+            skipped = msg.get("metrics", {}).get("skipped", False)
+            if skipped:
+                error = msg.get("metrics", {}).get("error_message", "")
+                self._log.append(f"    ×  {agent_name}: {error[:80]}")
+            else:
+                content = msg.get("content", "")
+                if content:
+                    self._log.append(f"    ↳  {agent_name}: {content}")
 
     def _reset(self):
         self._running = False
         self._bar.setValue(0)
         self._st.setText("")
         self._log.clear()
-        self._err.setVisible(False)
         self._start.setText("▶ 启动仿真")
         self._start.setEnabled(True)
         for v in self._mv.values():

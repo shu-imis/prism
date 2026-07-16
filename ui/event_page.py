@@ -1,12 +1,11 @@
 """供应链搭建"""
-import json
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QScrollArea,
     QSizePolicy,
     QTextEdit,
@@ -46,11 +45,23 @@ NODE_TYPES = [
 ]
 
 DEFAULT_NODES = [
-    {"name": "供应商A", "type": "supplier", "inventory": 80, "lead_time": 2, "capacity": 100},
-    {"name": "制造商", "type": "manufacturer", "inventory": 60, "lead_time": 3, "capacity": 150},
-    {"name": "分销商", "type": "distributor", "inventory": 50, "lead_time": 1, "capacity": 200},
-    {"name": "零售商", "type": "retailer", "inventory": 40, "lead_time": 1, "capacity": 80},
+    {"name": "节点 1", "type": "supplier", "inventory": 80, "lead_time": 2, "capacity": 100, "cost_index": 52, "downstream": ["节点 2"]},
+    {"name": "节点 2", "type": "manufacturer", "inventory": 60, "lead_time": 3, "capacity": 150, "cost_index": 58, "upstream": ["节点 1"], "downstream": ["节点 3"]},
+    {"name": "节点 3", "type": "distributor", "inventory": 50, "lead_time": 1, "capacity": 200, "cost_index": 54, "upstream": ["节点 2"], "downstream": ["节点 4"]},
+    {"name": "节点 4", "type": "retailer", "inventory": 40, "lead_time": 1, "capacity": 80, "cost_index": 49, "upstream": ["节点 3"]},
 ]
+
+
+def _format_refs(value):
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return value
+    return ", ".join(str(item).strip() for item in value if str(item).strip())
+
+
+def _parse_refs(text):
+    return [part.strip() for part in str(text).split(",") if part.strip()]
 
 
 class NodeEditor(QWidget):
@@ -61,7 +72,12 @@ class NodeEditor(QWidget):
         self._layout.setSpacing(PAD_SM)
 
     def add_node(self, data=None):
-        d = data or {"name": "", "type": "supplier", "inventory": 50, "lead_time": 2, "capacity": 100}
+        d = data or {
+            "name": "", "type": "supplier",
+            "inventory": 50, "cost_index": 50,
+            "lead_time": 2, "capacity": 100,
+            "upstream": [], "downstream": [],
+        }
         card = Card(padding=PAD_MD)
 
         hdr = QHBoxLayout()
@@ -75,18 +91,42 @@ class NodeEditor(QWidget):
 
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("名称"))
-        name = Input(d.get("name", ""))
+        name = Input("如：华东仓")
+        name.setText(str(d.get("name", "")))
         row1.addWidget(name)
 
         row1.addWidget(QLabel("类型"))
-        node_type = QComboBox()
+        type_val = d.get("type", "supplier")
+        selected_type = {"val": type_val}
+        node_type_widgets = []
         for val, label in NODE_TYPES:
-            node_type.addItem(label, val)
-        for val, label in NODE_TYPES:
-            if val == d.get("type", "supplier"):
-                node_type.setCurrentText(label)
-                break
-        row1.addWidget(node_type)
+            lbl = QLabel(label)
+            lbl.setCursor(Qt.PointingHandCursor)
+            lbl.setFixedHeight(BTN_H)
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.mousePressEvent = (
+                lambda e, v=val, s=selected_type, ws=node_type_widgets:
+                _select_type(v, s, ws)
+            )
+            node_type_widgets.append((val, lbl))
+            row1.addWidget(lbl)
+        row1.addStretch()
+
+        def _select_type(v, s, ws):
+            s["val"] = v
+            for tv, w in ws:
+                if tv == v:
+                    w.setStyleSheet(
+                        f"background:{TEXT_PRIMARY};color:{TEXT_ON_DARK};"
+                        "padding:2px 10px;font-size:12px;"
+                    )
+                else:
+                    w.setStyleSheet(
+                        f"background:transparent;color:{TEXT_MUTED};"
+                        "padding:2px 10px;font-size:12px;"
+                    )
+        _select_type(type_val, selected_type, node_type_widgets)
+
         card.add_layout(row1)
 
         row2 = QHBoxLayout()
@@ -101,16 +141,36 @@ class NodeEditor(QWidget):
         row2.addWidget(QLabel("产能上限"))
         cap = NumberInput(value=d.get("capacity", 100), min_val=0, max_val=200)
         row2.addWidget(cap)
+
+        row2.addWidget(QLabel("成本指数"))
+        cost_idx = NumberInput(value=d.get("cost_index", d.get("cost", 50)), min_val=0, max_val=100)
+        row2.addWidget(cost_idx)
         row2.addStretch()
         card.add_layout(row2)
+
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("上游节点"))
+        up = QLineEdit(_format_refs(d.get("upstream", [])))
+        up.setPlaceholderText("名称, 逗号分隔")
+        row3.addWidget(up)
+
+        row3.addWidget(QLabel("下游节点"))
+        down = QLineEdit(_format_refs(d.get("downstream", [])))
+        down.setPlaceholderText("名称, 逗号分隔")
+        row3.addWidget(down)
+        row3.addStretch()
+        card.add_layout(row3)
 
         self._nodes.append({
             "card": card,
             "name": name,
-            "type": node_type,
+            "type": selected_type,
             "inventory": inv,
             "lead_time": lead,
             "capacity": cap,
+            "cost": cost_idx,
+            "upstream": up,
+            "downstream": down,
         })
         self._layout.insertWidget(self._layout.count(), card)
         self._update_nums()
@@ -133,10 +193,13 @@ class NodeEditor(QWidget):
         for nd in self._nodes:
             result.append({
                 "name": nd["name"].text().strip(),
-                "type": nd["type"].currentData(),
+                "type": nd["type"]["val"],
                 "inventory": nd["inventory"].value(),
                 "lead_time": nd["lead_time"].value(),
                 "capacity": nd["capacity"].value(),
+                "cost_index": nd["cost"].value(),
+                "upstream": _parse_refs(nd["upstream"].text()),
+                "downstream": _parse_refs(nd["downstream"].text()),
             })
         return result
 
@@ -174,22 +237,18 @@ class EventPage(QWidget):
 
         inner = QWidget()
         inner_layout = QVBoxLayout(inner)
-        inner_layout.setContentsMargins(0, 0, PAD_XL, 0)
+        inner_layout.setContentsMargins(0, 0, 0, 0)
         inner_layout.setSpacing(PAD_SM)
 
         card = Card()
         card.add(Title("供应链搭建", 14))
 
         card.add(QLabel("供应链名称"))
-        self._title = Input("例：电子产品供应链推演")
+        self._title = Input("如：电子产品供应链推演")
         card.add(self._title)
 
         card.add(QLabel("行业"))
-        self._industry = QComboBox()
-        self._industry.setEditable(True)
-        self._industry.addItems([
-            "电子制造", "汽车", "快消/零售", "医药", "农产品", "其他",
-        ])
+        self._industry = Input("如：电子制造")
         card.add(self._industry)
 
         card.add(QLabel("供应链背景"))
@@ -206,16 +265,23 @@ class EventPage(QWidget):
         import_btn.clicked.connect(self._import_docs)
         card.add(import_btn)
 
-        card.add(QLabel("供应链节点"))
+        inner_layout.addWidget(card)
+
+        node_card = Card()
+        node_card.add(Title("供应链节点", 14))
+
         self._node_editor = NodeEditor()
         for n in DEFAULT_NODES:
             self._node_editor.add_node(n)
-        card.add(self._node_editor)
+        node_card.add(self._node_editor)
 
         add_node_btn = GhostBtn("＋ 添加节点")
         add_node_btn.clicked.connect(lambda: self._node_editor.add_node())
-        card.add(add_node_btn)
+        node_card.add(add_node_btn)
 
+        inner_layout.addWidget(node_card)
+
+        param_card = Card()
         hr = QHBoxLayout()
         hr.addWidget(QLabel("初始库存水平"))
         self._inv = NumberInput(value=75, min_val=0, max_val=100)
@@ -229,15 +295,10 @@ class EventPage(QWidget):
         self._svc = DecimalInput(value=0.85, min_val=0, max_val=1, step=0.05, decimals=2)
         hr.addWidget(self._svc)
         hr.addStretch()
-        card.add_layout(hr)
+        param_card.add_layout(hr)
 
-        inner_layout.addWidget(card)
+        inner_layout.addWidget(param_card)
         inner_layout.addStretch()
-
-        self._err = QLabel("")
-        self._err.setStyleSheet(f"color:{COLOR_RED};font-size:12px;")
-        self._err.setVisible(False)
-        inner_layout.addWidget(self._err)
 
         self._save_btn = PrimaryBtn("保存并配置决策方案 →")
         self._save_btn.clicked.connect(self._save)
@@ -253,6 +314,7 @@ class EventPage(QWidget):
         self._pid = p.id
         s = p.scenario
         self._title.setText(s.get("title", ""))
+        self._industry.setText(s.get("industry", ""))
         self._bg.setPlainText(s.get("background", ""))
         self._inv.setValue(s.get("initial_inventory", 75))
         self._cost.setValue(s.get("baseline_cost", 50))
@@ -280,32 +342,29 @@ class EventPage(QWidget):
                     f"已导入{len(self._imported)}个文档 — 保存并继续 →"
                 )
             except Exception as e:
-                self._err.setText(f"导入失败：{e}")
-                self._err.setVisible(True)
+                self.log(f"导入失败：{e}", is_error=True)
+                return
 
     def _save(self):
         t = self._title.text().strip()
         if len(t) > 80:
-            self._err.setText("名称不能超过80字")
-            self._err.setVisible(True)
+            self.log("名称不能超过 80 字", is_error=True)
             return
 
         bg = self._bg.toPlainText().strip()
         if not bg:
-            self._err.setText("请填写供应链背景")
-            self._err.setVisible(True)
+            self.log("请填写供应链背景", is_error=True)
             return
 
         nodes = self._node_editor.get_nodes()
         for n in nodes:
             if not n["name"]:
-                self._err.setText("请填写所有节点名称")
-                self._err.setVisible(True)
+                self.log("请填写所有节点名称", is_error=True)
                 return
 
         sc = {
             "title": t,
-            "industry": self._industry.currentText(),
+            "industry": self._industry.text(),
             "background": bg,
             "nodes": nodes,
             "initial_inventory": self._inv.value(),

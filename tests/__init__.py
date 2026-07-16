@@ -1,1 +1,1 @@
-"""Test package for Prism."""
+"""Prism 测试包。"""

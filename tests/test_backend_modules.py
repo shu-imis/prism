@@ -7,7 +7,7 @@ from pathlib import Path
 from core.agent_factory import AgentFactory
 from core.document_importer import chunk_text, import_documents, render_imported_documents
 from core.scenario_parser import ScenarioParser
-from core.simulation_engine import SimulationEngine, SimulationRecoverableError
+from core.simulation_engine import SimulationEngine
 from core.world_state import KeyEvent, WorldState
 from db.database import Database
 from db.models import (
@@ -332,7 +332,7 @@ class BackendModuleTests(unittest.TestCase):
 
         self.assertEqual(report.winner, "激进补货")
         self.assertIn("激进补货", markdown)
-        self.assertIn("<h1>", html)
+        self.assertIn("<h1", html)
         self.assertIn("供应链决策推演报告", markdown)
 
     def test_simulation_engine_runs_llm_rounds_and_events(self) -> None:

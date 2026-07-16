@@ -1,6 +1,6 @@
-"""pyqtgraph 图表封装
+"""图表接口封装（预留 pyqtgraph 接入）
 
-供应链指标曲线图、雷达图等可视化组件的统一封装。
+供应链指标曲线图、雷达图等可视化组件的接口定义。
 """
 from __future__ import annotations
 

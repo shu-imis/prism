@@ -34,7 +34,7 @@ class SimulationDefaults:
 @dataclass
 class LLMDefaults:
     """LLM 调用默认参数"""
-    default_model: str = "gpt-4o-mini"
+    default_model: str = "gpt-5.6-sol"
     temperature: float = 0.7
     max_retries: int = 3
     request_timeout: int = 30
@@ -55,7 +55,7 @@ class AppConfig:
             agent_count=int(os.getenv("SIM_AGENT_COUNT", "7")),
         )
         llm = LLMDefaults(
-            default_model=os.getenv("LLM_DEFAULT_MODEL", "gpt-4o-mini"),
+            default_model=os.getenv("LLM_DEFAULT_MODEL", "gpt-5.6-sol"),
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
             max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
             request_timeout=int(os.getenv("LLM_REQUEST_TIMEOUT", "30")),

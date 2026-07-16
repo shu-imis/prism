@@ -1,12 +1,13 @@
 """Prism 主窗口"""
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout,
-    QStackedWidget, QPushButton, QLabel, QSplitter, QButtonGroup,
+    QMainWindow, QWidget, QVBoxLayout, QPushButton, QLabel,
+    QStackedWidget, QSplitter, QButtonGroup,
 )
 from PySide6.QtCore import Qt
 from ui.styles import stylesheet, SIDEBAR_W
 from ui.home_page import HomePage
 from ui.process_page import ProcessPage
+from ui.title_bar import TitleBar
 
 
 class MainWindow(QMainWindow):
@@ -16,10 +17,34 @@ class MainWindow(QMainWindow):
         self.resize(1100, 700)
         self.setWindowTitle("Prism")
         self.setStyleSheet(stylesheet())
+        self._setup_window()
         self._build()
         self._center()
 
+    def changeEvent(self, event):
+        if event.type() == event.Type.ActivationChange:
+            self._title_bar.set_active(self.isActiveWindow())
+        super().changeEvent(event)
+
+    def _setup_window(self):
+        # 无边框窗口，自定义标题栏替代
+        self.setWindowFlag(Qt.FramelessWindowHint)
+
     def _build(self):
+        # ---- 整体容器 ----
+        container = QWidget()
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # ---- 自定义标题栏 ----
+        self._title_bar = TitleBar()
+        self._title_bar.minimized.connect(self.showMinimized)
+        self._title_bar.maximized.connect(self._toggle_maximize)
+        self._title_bar.closed.connect(self.close)
+        main_layout.addWidget(self._title_bar)
+
+        # ---- 分割器（侧边栏 + 内容） ----
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(1)
         splitter.setChildrenCollapsible(False)
@@ -65,8 +90,17 @@ class MainWindow(QMainWindow):
 
         splitter.addWidget(self._stack)
         splitter.setSizes([SIDEBAR_W, 900])
-        self.setCentralWidget(splitter)
+
+        main_layout.addWidget(splitter, 1)
+        self.setCentralWidget(container)
+
         self._go(0)
+
+    def _toggle_maximize(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
 
     def _go(self, idx: int):
         self._stack.setCurrentIndex(idx)

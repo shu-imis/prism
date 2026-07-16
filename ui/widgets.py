@@ -2,10 +2,10 @@
 from PySide6.QtWidgets import (
     QFrame, QPushButton, QLineEdit, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy, QWidget,
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QRectF
+from PySide6.QtGui import QColor, QFont, QPainter
 from ui.styles import (
-    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, BG_INPUT, BG_SURFACE, BG_HOVER,
+    TEXT_PRIMARY, TEXT_MUTED, TEXT_ON_DARK, ACCENT, BG_INPUT, BG_SURFACE, BG_HOVER,
     BORDER, BTN_H, PAD_LG, PAD_MD,
 )
 
@@ -76,16 +76,6 @@ class Title(QLabel):
         self.setStyleSheet(f"color: {TEXT_PRIMARY};")
 
 
-class Subtitle(QLabel):
-    def __init__(self, text="", parent=None):
-        super().__init__(text, parent)
-        self.setWordWrap(True)
-        f = QFont()
-        f.setPointSize(13)
-        self.setFont(f)
-        self.setStyleSheet(f"color: {TEXT_SECONDARY};")
-
-
 class Caption(QLabel):
     def __init__(self, text="", parent=None):
         super().__init__(text, parent)
@@ -94,17 +84,6 @@ class Caption(QLabel):
         f.setPointSize(11)
         self.setFont(f)
         self.setStyleSheet(f"color: {TEXT_MUTED};")
-
-
-class MonoLabel(QLabel):
-    """等宽字体标签 — 用于数据/编号"""
-    def __init__(self, text="", parent=None):
-        super().__init__(text, parent)
-        f = QFont("JetBrains Mono")
-        f.setPointSize(12)
-        f.setBold(True)
-        self.setFont(f)
-        self.setStyleSheet(f"color: {TEXT_PRIMARY};")
 
 
 class Divider(QFrame):
@@ -149,7 +128,7 @@ class NumberInput(QWidget):
         self._input.setAlignment(Qt.AlignCenter)
         self._input.setStyleSheet(
             f"QLineEdit{{background:{BG_INPUT};border:1px solid {BORDER};border-left:none;border-right:none;font-family:'JetBrains Mono';font-size:13px;color:{TEXT_PRIMARY};}}"
-            f"QLineEdit:focus{{border-color:{TEXT_PRIMARY};}}"
+            f"QLineEdit:focus{{border:1px solid {TEXT_PRIMARY};}}"
         )
         self._input.editingFinished.connect(self._validate_input)
         layout.addWidget(self._input)
@@ -206,6 +185,52 @@ class NumberInput(QWidget):
         self._step = step
 
 
+class ProgressBar(QWidget):
+    """自定义进度条 — QPainter 绘制，macOS 上显示一致"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._value = 0
+        self.setFixedHeight(26)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def setValue(self, value: int):
+        self._value = max(0, min(100, int(value)))
+        self.update()
+
+    def setFormat(self, _fmt: str):
+        pass  # 始终显示百分比
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+
+        w = self.width()
+        h = self.height()
+
+        # 轨道
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(BORDER))
+        painter.drawRect(0, 0, w, h)
+
+        # 填充
+        if self._value > 0:
+            fill_w = int(w * self._value / 100)
+            painter.setBrush(QColor(TEXT_PRIMARY))
+            painter.drawRect(0, 0, fill_w, h)
+
+        # 文字 — 填充过半时切换为白色
+        text = f"{self._value}%"
+        font = QFont()
+        font.setPointSize(10)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor(TEXT_ON_DARK if self._value > 45 else TEXT_PRIMARY))
+        painter.drawText(QRectF(0, 0, w, h), Qt.AlignCenter, text)
+        painter.end()
+
+
+
 class DecimalInput(QWidget):
     """带加减按钮的小数输入框 — 左右布局"""
     def __init__(self, value=0.0, min_val=0.0, max_val=1.0, step=0.05, decimals=2, parent=None):
@@ -234,7 +259,7 @@ class DecimalInput(QWidget):
         self._input.setAlignment(Qt.AlignCenter)
         self._input.setStyleSheet(
             f"QLineEdit{{background:{BG_INPUT};border:1px solid {BORDER};border-left:none;border-right:none;font-family:'JetBrains Mono';font-size:13px;color:{TEXT_PRIMARY};}}"
-            f"QLineEdit:focus{{border-color:{TEXT_PRIMARY};}}"
+            f"QLineEdit:focus{{border:1px solid {TEXT_PRIMARY};}}"
         )
         self._input.editingFinished.connect(self._validate_input)
         layout.addWidget(self._input)
@@ -289,3 +314,6 @@ class DecimalInput(QWidget):
 
     def setSingleStep(self, step):
         self._step = step
+
+
+

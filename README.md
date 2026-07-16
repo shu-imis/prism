@@ -13,7 +13,7 @@
 1. **供应链搭建** — 定义行业、节点、初始库存/成本/服务水平，导入背景文档
 2. **行为体决策配置** — 2~4 组对比方案，指定行为体、决策内容与生效周期
 3. **多行为体仿真** — 7 类行为体（供应商→制造商→分销商→零售商→物流→消费者→监管）LLM 推演，实时显示库存/成本/服务水平/利润率/交付延迟
-4. **结果分析** — 方案对比表、六维评分雷达图、风险提示，一键导出 Markdown/PDF
+4. **结果分析** — 方案对比表、六维评分雷达图、风险提示，导出 Markdown
 
 ## 核心特性
 
@@ -38,7 +38,7 @@ python main.py
 | 桌面 UI | PySide6 |
 | LLM 调用 | OpenAI / Anthropic SDK（双厂商 fallback） |
 | 数据存储 | SQLite（WAL 模式） |
-| 报告导出 | WeasyPrint（PDF）+ Markdown |
+| 报告导出 | Markdown |
 | 文档解析 | pypdf + python-docx |
 | 配置管理 | python-dotenv |
 
@@ -53,6 +53,7 @@ prism/
 │   └── icons/                  # 应用图标
 ├── ui/                          # PySide6 界面
 │   ├── main_window.py
+│   ├── title_bar.py              # 自定义标题栏（macOS / Windows）
 │   ├── home_page.py
 │   ├── process_page.py          # 4 步工作流协调
 │   ├── event_page.py            # 供应链搭建（Step 01）

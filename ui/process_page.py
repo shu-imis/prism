@@ -1,5 +1,4 @@
 """工作区"""
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -66,7 +65,7 @@ class ProcessPage(QWidget):
 
         # --- 主体 ---
         body = QVBoxLayout()
-        body.setContentsMargins(PAD_XL, PAD_XL, 0, PAD_LG)
+        body.setContentsMargins(PAD_XL, PAD_XL, PAD_XL, 0)
         body.setSpacing(0)
 
         self._stack = QStackedWidget()
@@ -77,14 +76,16 @@ class ProcessPage(QWidget):
         for p in [self._ep, self._sp, self._smp, self._rp]:
             self._stack.addWidget(p)
         body.addWidget(self._stack, 1)
-        body.addSpacing(PAD_MD)
-        body.addWidget(Divider())
-        body.addSpacing(PAD_MD)
+
+        layout.addLayout(body, 1)
 
         # --- 导航 ---
+        layout.addSpacing(PAD_XL)
+        layout.addWidget(Divider())
+
         nav = QHBoxLayout()
         nav.setSpacing(PAD_MD)
-        nav.setContentsMargins(0, 0, PAD_XL, 0)
+        nav.setContentsMargins(PAD_XL, PAD_MD, PAD_XL, PAD_MD)
 
         self._back = SecondaryBtn("← 上一步")
         self._back.clicked.connect(self._prev)
@@ -95,41 +96,47 @@ class ProcessPage(QWidget):
         self._next = PrimaryBtn("下一步 →")
         self._next.clicked.connect(self._next_clicked)
         nav.addWidget(self._next)
-        body.addLayout(nav)
-
-        layout.addLayout(body, 1)
+        layout.addLayout(nav)
 
         # --- 日志终端 ---
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
-        self._log.setFixedHeight(100)
+        self._log.setFixedHeight(120)
         self._log.setFrameShape(QFrame.NoFrame)
         self._log.setStyleSheet(
             "QPlainTextEdit{"
             "background:#1A1A1A;color:#AAA;"
             "font-family:'JetBrains Mono','Noto Sans SC';font-size:11px;"
-            "border:none;padding:6px 0 6px 10px;"
+            "border:none;padding:6px 10px;"
             "}"
         )
         layout.addWidget(self._log)
 
-        self._p("工作区已就绪。")
+        self._p("工作区已就绪")
         self._update()
 
     def _wire(self):
         self._ep.project_saved.connect(self._on_saved)
         self._sp.strategies_saved.connect(self._on_saved)
         self._smp.simulation_completed.connect(self._on_done)
+        # 将终端日志接口传给各页面
+        self._ep.log = self._log_msg
+        self._sp.log = self._log_msg
+        self._smp.log = self._log_msg
+
+    def _log_msg(self, msg, is_error=False):
+        prefix = "×" if is_error else ">"
+        self._log.appendPlainText(f"  {prefix}  {msg}")
 
     def _on_saved(self, pid):
         self._pid = pid
-        self._p(f"已保存 #{pid}")
+        self._p(f"项目已保存 （#{pid}）")
         self._advance()
 
     def _on_done(self, r, res):
-        self._rp.set_report(r)
-        self._p("仿真完成")
+        self._p("仿真已完成")
         self._advance()
+        self._rp.set_report(r, res)
 
     def _next_clicked(self):
         if self._step == 0:
@@ -179,7 +186,7 @@ class ProcessPage(QWidget):
             self._next.setVisible(True)
 
     def _p(self, msg):
-        self._log.appendPlainText(f"$ {msg}")
+        self._log.appendPlainText(f"  >  {msg}")
 
     def load_project(self, pid):
         self._pid = pid
@@ -187,7 +194,7 @@ class ProcessPage(QWidget):
         self._update()
         self._log.clear()
         self._ep.load_project(pid)
-        self._p(f"加载项目 #{pid}")
+        self._p(f"项目已加载 （#{pid}）")
 
     def reset(self):
         self._pid = None
@@ -197,4 +204,4 @@ class ProcessPage(QWidget):
         self._ep.reset_for_new_project()
         self._sp.reset()
         self._smp.reset_for_new_project()
-        self._p("工作区已就绪。")
+        self._p("工作区已就绪")

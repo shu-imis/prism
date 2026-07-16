@@ -133,7 +133,7 @@ Prism 为单体桌面应用，基于 PySide6 实现全部交互与业务逻辑�
 | 业务逻辑 | Python 3.11+ | |
 | LLM 调用 | openai SDK + anthropic SDK | 支持 fallback |
 | 数据存储 | SQLite | 单文件数据库，WAL 模式 |
-| 报告导出 | WeasyPrint (PDF) | 降级为 HTML |
+| 报告导出 | Markdown |
 | 配置管理 | python-dotenv | API Key 通过 .env 或页面输入 |
 | 文档解析 | pypdf + python-docx | RAG 文档导入 |
 
@@ -173,13 +173,13 @@ Prism 为单体桌面应用，基于 PySide6 实现全部交互与业务逻辑�
 - 推荐决策方案 + 执行摘要
 - 方案对比表格（库存/成本/交付时效/服务水平/利润率/韧性）
 - 六维评分（成本控制/交付稳定性/库存健康度/风险抵御/协同效率/可执行性）
-- 导出 Markdown / PDF
+- 导出 Markdown
 
 ### 5.6 评估报告
 - 方案对比与推荐
 - 风险提示
 - 应用内终端日志
-- 导出 PDF / Markdown
+- 导出 Markdown
 
 ---
 
@@ -248,6 +248,7 @@ prism/
 │   └── icons/                   # 应用图标（icns / ico / png）
 ├── ui/
 │   ├── main_window.py           # 主窗口 + 侧边栏导航
+│   ├── title_bar.py              # 自定义标题栏（macOS / Windows）
 │   ├── home_page.py             # 首页 — 项目列表
 │   ├── process_page.py          # 工作区 — 4 步流程协调
 │   ├── event_page.py            # 供应链搭建（Step 01）
@@ -270,7 +271,7 @@ prism/
 ├── report/
 │   ├── generator.py             # 报告生成器
 │   ├── charts.py                # 图表
-│   └── exporter.py              # PDF / Markdown 导出
+│   └── exporter.py              # Markdown / HTML 导出
 ├── db/
 │   ├── database.py              # SQLite 连接 + 迁移
 │   └── models.py                # 数据模型 + Repository

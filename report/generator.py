@@ -10,11 +10,6 @@ from typing import Any
 
 from core.world_state import WorldState
 from core import clamp
-from llm.client import LLMClient  # 预留：LLM 方案评估
-from llm.prompts import (  # 预留：LLM 评估 prompt
-    REPORT_GENERATION_SYSTEM,
-    STRATEGY_EVALUATION_SYSTEM,
-)
 
 # 预留：LLM 评分维度中英文映射
 SCORE_DIMENSION_MAP: dict[str, str] = {
@@ -98,13 +93,11 @@ class ProjectReport:
 class ReportGenerator:
     """报告生成器。"""
 
-    def __init__(self, project_name: str = "", scenario_background: str = "", llm_client: LLMClient | None = None, use_llm: bool = False):
+    def __init__(self, project_name: str = "", scenario_background: str = ""):
         self.report = ProjectReport(
             project_name=project_name,
             scenario_background=scenario_background,
         )
-        self.llm_client = llm_client
-        self.use_llm = use_llm
 
     def add_strategy_result(
         self,
@@ -202,7 +195,7 @@ def detect_risks(
     if final.delivery_delay >= 3 or delay_delta >= 1.5:
         risks.append("交付延迟严重，客户满意度下降")
     if final.profit_margin < 0:
-        risks.append("全链亏损预警，需紧急调整策略")
+        risks.append("全链亏损预警，需紧急调整方案")
     if any("监管" in event for event in key_events):
         risks.append("出现监管介入信号，需准备合规说明")
     if final.service_level < 0.7:

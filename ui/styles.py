@@ -27,11 +27,6 @@ COLOR_RED = "#C46B6B"
 COLOR_ORANGE = "#D4A853"
 COLOR_BLUE = "#6B8EB3"
 
-SPECTRUM_INDIGO = "#5B5FEF"
-SPECTRUM_VIOLET = "#7C3AED"
-SPECTRUM_CYAN = "#06B6D4"
-SPECTRUM_GREEN = "#10B981"
-
 # ============================================================
 # 尺寸
 # ============================================================
@@ -153,22 +148,24 @@ QComboBox {{
     padding: 5px 8px;
     min-width: 150px;
 }}
-QComboBox::drop-down {{ 
-    border: none; 
-    width: 24px; 
-    subcontrol-position: right center;
+QComboBox::drop-down {{
+    border: none;
+    border-left: 1px solid {BORDER};
+    width: 28px;
 }}
 QComboBox::down-arrow {{
     image: none;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 5px solid {TEXT_PRIMARY};
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 4px solid {TEXT_MUTED};
     width: 0;
     height: 0;
-    margin: 0 6px;
+}}
+QComboBox:hover::down-arrow {{
+    border-top-color: {TEXT_PRIMARY};
 }}
 QComboBox::down-arrow:on {{
-    border-bottom: 5px solid {TEXT_PRIMARY};
+    border-bottom: 4px solid {TEXT_PRIMARY};
     border-top: none;
 }}
 QComboBox QAbstractItemView {{
@@ -182,6 +179,11 @@ QComboBox QAbstractItemView {{
 QComboBox QAbstractItemView::item {{
     padding: 6px 10px;
     min-height: 24px;
+    color: {TEXT_PRIMARY};
+}}
+QComboBox QAbstractItemView::item:selected {{
+    background: {BG_HOVER};
+    color: {TEXT_PRIMARY};
 }}
 
 /* ---- 滑块 ---- */
@@ -198,15 +200,6 @@ QSlider::handle:horizontal {{
 }}
 QSlider::handle:horizontal:hover {{ background: {ACCENT}; }}
 QSlider::sub-page:horizontal {{ background: {TEXT_PRIMARY}; border-radius: 0px; }}
-
-/* ---- 进度条 ---- */
-QProgressBar {{
-    background: {BORDER};
-    border: none;
-    border-radius: 0px;
-    height: 4px;
-}}
-QProgressBar::chunk {{ background: {TEXT_PRIMARY}; border-radius: 0px; }}
 
 /* ---- 列表 ---- */
 QListWidget {{
@@ -225,11 +218,11 @@ QListWidget::item:selected {{ background: #E8E8E8; }}
 
 /* ---- 滚动条 ---- */
 QScrollBar:vertical {{ background: transparent; width: 6px; }}
-QScrollBar::handle:vertical {{ background: #CCC; border-radius: 0px; min-height: 20px; }}
+QScrollBar::handle:vertical {{ background: #CCC; border-radius: 3px; min-height: 20px; }}
 QScrollBar::handle:vertical:hover {{ background: #AAA; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollBar:horizontal {{ background: transparent; height: 6px; }}
-QScrollBar::handle:horizontal {{ background: #CCC; border-radius: 0px; min-width: 20px; }}
+QScrollBar::handle:horizontal {{ background: #CCC; border-radius: 3px; min-width: 20px; }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
 
 /* ---- 标签页 ---- */
@@ -278,4 +271,7 @@ QCheckBox::indicator {{
     background: {BG_SURFACE};
 }}
 QCheckBox::indicator:checked {{ background: {TEXT_PRIMARY}; border-color: {TEXT_PRIMARY}; }}
+
+/* ---- 自定义标题栏 ---- */
+#titleBar {{ background: {BG_PAGE}; }}
 """

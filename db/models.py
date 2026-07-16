@@ -217,7 +217,7 @@ class ProjectRepository:
 
 
 class StrategyRepository:
-    """策略数据访问。"""
+    """方案数据访问。"""
 
     def __init__(self, db: Database | None = None):
         self.db = db or Database()
@@ -248,7 +248,7 @@ class StrategyRepository:
             (strategy_id,),
         ).fetchone()
         if row is None:
-            raise KeyError(f"策略不存在: {strategy_id}")
+            raise KeyError(f"方案不存在: {strategy_id}")
         return Strategy(**dict(row))
 
     def list_by_project(self, project_id: int) -> list[Strategy]:
