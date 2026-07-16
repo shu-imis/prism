@@ -4,13 +4,11 @@ import json
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QScrollArea,
     QSizePolicy,
-    QSpinBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -27,11 +25,131 @@ from ui.styles import *
 from ui.widgets import (
     Caption,
     Card,
+    DangerBtn,
+    DecimalInput,
+    GhostBtn,
     Input,
+    NumberInput,
     PrimaryBtn,
     SecondaryBtn,
     Title,
 )
+
+NODE_TYPES = [
+    ("supplier", "原材料供应商"),
+    ("manufacturer", "制造商"),
+    ("distributor", "分销商"),
+    ("retailer", "零售商"),
+    ("logistics", "物流服务商"),
+    ("consumer", "消费者"),
+    ("regulator", "监管机构"),
+]
+
+DEFAULT_NODES = [
+    {"name": "供应商A", "type": "supplier", "inventory": 80, "lead_time": 2, "capacity": 100},
+    {"name": "制造商", "type": "manufacturer", "inventory": 60, "lead_time": 3, "capacity": 150},
+    {"name": "分销商", "type": "distributor", "inventory": 50, "lead_time": 1, "capacity": 200},
+    {"name": "零售商", "type": "retailer", "inventory": 40, "lead_time": 1, "capacity": 80},
+]
+
+
+class NodeEditor(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._nodes = []
+        self._layout = QVBoxLayout(self)
+        self._layout.setSpacing(PAD_SM)
+
+    def add_node(self, data=None):
+        d = data or {"name": "", "type": "supplier", "inventory": 50, "lead_time": 2, "capacity": 100}
+        card = Card(padding=PAD_MD)
+
+        hdr = QHBoxLayout()
+        hdr.addWidget(Title(f"节点 {len(self._nodes) + 1}", 12))
+        hdr.addStretch()
+        if len(self._nodes) >= 1:
+            rm = DangerBtn("删除")
+            rm.clicked.connect(lambda: self._remove(card))
+            hdr.addWidget(rm)
+        card.add_layout(hdr)
+
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("名称"))
+        name = Input(d.get("name", ""))
+        row1.addWidget(name)
+
+        row1.addWidget(QLabel("类型"))
+        node_type = QComboBox()
+        for val, label in NODE_TYPES:
+            node_type.addItem(label, val)
+        for val, label in NODE_TYPES:
+            if val == d.get("type", "supplier"):
+                node_type.setCurrentText(label)
+                break
+        row1.addWidget(node_type)
+        card.add_layout(row1)
+
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("库存"))
+        inv = NumberInput(value=d.get("inventory", 50), min_val=0, max_val=100)
+        row2.addWidget(inv)
+
+        row2.addWidget(QLabel("交货周期"))
+        lead = NumberInput(value=d.get("lead_time", 2), min_val=0, max_val=10)
+        row2.addWidget(lead)
+
+        row2.addWidget(QLabel("产能上限"))
+        cap = NumberInput(value=d.get("capacity", 100), min_val=0, max_val=200)
+        row2.addWidget(cap)
+        row2.addStretch()
+        card.add_layout(row2)
+
+        self._nodes.append({
+            "card": card,
+            "name": name,
+            "type": node_type,
+            "inventory": inv,
+            "lead_time": lead,
+            "capacity": cap,
+        })
+        self._layout.insertWidget(self._layout.count(), card)
+        self._update_nums()
+
+    def _remove(self, card):
+        for i, nd in enumerate(self._nodes):
+            if nd["card"] is card:
+                self._layout.removeWidget(card)
+                card.deleteLater()
+                del self._nodes[i]
+                break
+        self._update_nums()
+
+    def _update_nums(self):
+        for i, nd in enumerate(self._nodes):
+            nd["card"].findChild(QLabel).setText(f"节点 {i + 1}")
+
+    def get_nodes(self):
+        result = []
+        for nd in self._nodes:
+            result.append({
+                "name": nd["name"].text().strip(),
+                "type": nd["type"].currentData(),
+                "inventory": nd["inventory"].value(),
+                "lead_time": nd["lead_time"].value(),
+                "capacity": nd["capacity"].value(),
+            })
+        return result
+
+    def set_nodes(self, nodes):
+        while self._nodes:
+            nd = self._nodes.pop()
+            self._layout.removeWidget(nd["card"])
+            nd["card"].deleteLater()
+        for n in nodes:
+            self.add_node(n)
+
+    def clear(self):
+        self.set_nodes([])
 
 
 class EventPage(QWidget):
@@ -88,33 +206,27 @@ class EventPage(QWidget):
         import_btn.clicked.connect(self._import_docs)
         card.add(import_btn)
 
-        card.add(QLabel("供应链节点（JSON格式）"))
-        self._nodes = QTextEdit()
-        self._nodes.setPlaceholderText(
-            '[{"name":"供应商A","type":"supplier","inventory":80,'
-            '"lead_time":2,"capacity":100},...]'
-        )
-        card.add(self._nodes)
+        card.add(QLabel("供应链节点"))
+        self._node_editor = NodeEditor()
+        for n in DEFAULT_NODES:
+            self._node_editor.add_node(n)
+        card.add(self._node_editor)
+
+        add_node_btn = GhostBtn("＋ 添加节点")
+        add_node_btn.clicked.connect(lambda: self._node_editor.add_node())
+        card.add(add_node_btn)
 
         hr = QHBoxLayout()
         hr.addWidget(QLabel("初始库存水平"))
-        self._inv = QSpinBox()
-        self._inv.setRange(0, 100)
-        self._inv.setValue(75)
+        self._inv = NumberInput(value=75, min_val=0, max_val=100)
         hr.addWidget(self._inv)
 
         hr.addWidget(QLabel("基线成本指数"))
-        self._cost = QSpinBox()
-        self._cost.setRange(0, 100)
-        self._cost.setValue(50)
+        self._cost = NumberInput(value=50, min_val=0, max_val=100)
         hr.addWidget(self._cost)
 
         hr.addWidget(QLabel("基线服务水平"))
-        self._svc = QDoubleSpinBox()
-        self._svc.setRange(0, 1)
-        self._svc.setSingleStep(0.05)
-        self._svc.setDecimals(2)
-        self._svc.setValue(0.85)
+        self._svc = DecimalInput(value=0.85, min_val=0, max_val=1, step=0.05, decimals=2)
         hr.addWidget(self._svc)
         hr.addStretch()
         card.add_layout(hr)
@@ -145,16 +257,14 @@ class EventPage(QWidget):
         self._inv.setValue(s.get("initial_inventory", 75))
         self._cost.setValue(s.get("baseline_cost", 50))
         self._svc.setValue(s.get("baseline_service_level", 0.85))
-        self._nodes.setPlainText(
-            json.dumps(s.get("nodes", []), ensure_ascii=False, indent=2)
-        )
+        self._node_editor.set_nodes(s.get("nodes", DEFAULT_NODES))
 
     def reset_for_new_project(self):
         self._pid = None
         self._imported = []
         self._title.clear()
         self._bg.clear()
-        self._nodes.clear()
+        self._node_editor.set_nodes(DEFAULT_NODES)
         self._inv.setValue(75)
         self._cost.setValue(50)
         self._svc.setValue(0.85)
@@ -186,13 +296,12 @@ class EventPage(QWidget):
             self._err.setVisible(True)
             return
 
-        nodes_text = self._nodes.toPlainText().strip()
-        try:
-            nodes = json.loads(nodes_text) if nodes_text else []
-        except json.JSONDecodeError:
-            self._err.setText("节点JSON格式错误")
-            self._err.setVisible(True)
-            return
+        nodes = self._node_editor.get_nodes()
+        for n in nodes:
+            if not n["name"]:
+                self._err.setText("请填写所有节点名称")
+                self._err.setVisible(True)
+                return
 
         sc = {
             "title": t,

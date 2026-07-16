@@ -136,7 +136,7 @@ QMainWindow {{ background: {BG_PAGE}; }}
 #dangerBtn:hover {{ background: rgba(244,67,54,0.06); }}
 
 /* ---- 输入 ---- */
-QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox {{
+QLineEdit, QPlainTextEdit, QTextEdit {{
     background: {BG_INPUT};
     border: 1px solid {BORDER};
     border-radius: 0px;
@@ -151,12 +151,37 @@ QComboBox {{
     border: 1px solid {BORDER};
     border-radius: 0px;
     padding: 5px 8px;
+    min-width: 150px;
 }}
-QComboBox::drop-down {{ border: none; width: 20px; }}
+QComboBox::drop-down {{ 
+    border: none; 
+    width: 24px; 
+    subcontrol-position: right center;
+}}
+QComboBox::down-arrow {{
+    image: none;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid {TEXT_PRIMARY};
+    width: 0;
+    height: 0;
+    margin: 0 6px;
+}}
+QComboBox::down-arrow:on {{
+    border-bottom: 5px solid {TEXT_PRIMARY};
+    border-top: none;
+}}
 QComboBox QAbstractItemView {{
     background: {BG_SURFACE};
     border: 1px solid {BORDER};
     selection-background-color: {BG_HOVER};
+    min-width: 180px;
+    max-height: 250px;
+    outline: none;
+}}
+QComboBox QAbstractItemView::item {{
+    padding: 6px 10px;
+    min-height: 24px;
 }}
 
 /* ---- 滑块 ---- */

@@ -310,6 +310,7 @@ class SimulationPage(QWidget):
         margin = p.get("margin", 0)
         delay = p.get("delay", 0)
         r = p.get("round", 0)
+        messages = p.get("messages", [])
 
         self._mv["库存"].setText(f"{inv:.1f}")
         self._mv["成本"].setText(f"{cost:.1f}")
@@ -321,6 +322,12 @@ class SimulationPage(QWidget):
             f"[周期{r}] 库存{inv:.0f} 成本{cost:.0f} "
             f"服务{svc:.0%} 利润{margin:+.1%}"
         )
+
+        for msg in messages:
+            agent_name = msg.get("agent_name", "未知行为体")
+            content = msg.get("content", "")
+            if content:
+                self._log.append(f"  → {agent_name}: {content[:80]}...")
 
     def _reset(self):
         self._running = False

@@ -28,7 +28,7 @@ from ui.widgets import (
 
 DEFAULT = [
     {
-        "name": "激进补货策略",
+        "name": "激进补货方案",
         "actor": "零售商",
         "decision": "增加安全库存至150%,提前2周期向制造商下单,同时启动促销活动刺激需求",
         "release_cycle": "1-6",
@@ -39,7 +39,7 @@ DEFAULT = [
         },
     },
     {
-        "name": "保守观望策略",
+        "name": "保守观望方案",
         "actor": "制造商",
         "decision": "维持当前排产计划不变,密切监控上下游库存变化,仅在库存低于30%时触发补货",
         "release_cycle": "1-12",
@@ -76,15 +76,20 @@ class StrategyPage(QWidget):
         self._il.setContentsMargins(0, 0, PAD_XL, 0)
         self._il.setSpacing(PAD_SM)
 
+        card = Card()
+        card.add(Title("行为体决策配置", 14))
+        card.add(Caption("请配置2~4种决策方案，用于对比不同方案对供应链的影响"))
+        self._il.addWidget(card)
+
         for d in DEFAULT:
             self._add_card(d)
 
         self._il.addStretch()
 
         br = QHBoxLayout()
-        add_btn = GhostBtn("＋ 添加方案")
-        add_btn.clicked.connect(lambda: self._add_card())
-        br.addWidget(add_btn)
+        self._add_btn = GhostBtn("＋ 添加方案")
+        self._add_btn.clicked.connect(self._add_card)
+        br.addWidget(self._add_btn)
         br.addStretch()
 
         self._save_btn = PrimaryBtn("保存并开始仿真 →")
@@ -92,10 +97,17 @@ class StrategyPage(QWidget):
         br.addWidget(self._save_btn)
         self._il.addLayout(br)
 
+        self._err = QLabel("")
+        self._err.setStyleSheet(f"color:{COLOR_RED};font-size:12px;")
+        self._err.setVisible(False)
+        self._il.addWidget(self._err)
+
         scroll.setWidget(inner)
         layout.addWidget(scroll)
 
     def _add_card(self, data=None):
+        if len(self._cards) >= 4:
+            return
         d = data or {"name": "", "actor": "", "decision": "", "release_cycle": "", "parameters": {}}
 
         card = Card(padding=PAD_MD)
@@ -202,19 +214,42 @@ class StrategyPage(QWidget):
         if not self._pid:
             return
 
+        if len(self._cards) < 2:
+            self._err.setText("至少需要配置2种决策方案")
+            self._err.setVisible(True)
+            return
+
+        if len(self._cards) > 4:
+            self._err.setText("最多只能配置4种决策方案")
+            self._err.setVisible(True)
+            return
+
         data = []
         for cd in self._cards:
+            name = cd["name"].text().strip()
+            if not name:
+                self._err.setText("请填写所有方案名称")
+                self._err.setVisible(True)
+                return
+
+            decision = cd["decision"].toPlainText().strip()
+            if not decision:
+                self._err.setText("请填写所有方案的决策内容")
+                self._err.setVisible(True)
+                return
+
             try:
                 params = json.loads(cd["parameters"].toPlainText().strip())
             except json.JSONDecodeError:
                 params = {}
             data.append({
-                "name": cd["name"].text().strip(),
+                "name": name,
                 "actor": cd["actor"].currentText(),
-                "decision": cd["decision"].toPlainText().strip(),
+                "decision": decision,
                 "release_cycle": cd["release_cycle"].text().strip(),
                 "parameters": params,
             })
 
+        self._err.setVisible(False)
         StrategyRepository().replace_for_project(self._pid, data)
         self.strategies_saved.emit(self._pid)

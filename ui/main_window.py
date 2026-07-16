@@ -60,8 +60,8 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._home)
         self._stack.addWidget(self._process)
 
-        self._home.new_project.connect(lambda: self._go(1))
-        self._home.open_project.connect(lambda pid: (setattr(self._process, '_project_id', pid), self._go(1)))
+        self._home.new_project.connect(lambda: (self._process.reset(), self._go(1)))
+        self._home.open_project.connect(lambda pid: (self._process.load_project(pid), self._go(1)))
 
         splitter.addWidget(self._stack)
         splitter.setSizes([SIDEBAR_W, 900])

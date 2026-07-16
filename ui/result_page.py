@@ -1,4 +1,6 @@
 """结果分析"""
+import json
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -13,9 +15,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.world_state import WorldState, KeyEvent
 from db.models import ReportRepository, SimulationRoundRepository, StrategyRepository
 from report.exporter import ReportExporter
-from report.generator import ProjectReport, ReportGenerator
+from report.generator import ProjectReport, ReportGenerator, StrategyReport
 from ui.styles import *
 from ui.widgets import Caption, Card, PrimaryBtn, SecondaryBtn, Title
 
@@ -111,17 +114,51 @@ class ResultPage(QWidget):
                 executive_summary=r.summary.get("summary", ""),
                 winner=r.summary.get("winner", ""),
             )
+            for sr_data in r.summary.get("strategy_reports", []):
+                self._report.strategy_reports.append(StrategyReport(
+                    strategy_name=sr_data.get("strategy_name", ""),
+                    strategy_decision=sr_data.get("strategy_decision", ""),
+                    final_inventory=sr_data.get("final_inventory", 0.0),
+                    final_cost=sr_data.get("final_cost", 0.0),
+                    final_delivery_delay=sr_data.get("final_delivery_delay", 0.0),
+                    final_service_level=sr_data.get("final_service_level", 0.0),
+                    final_profit_margin=sr_data.get("final_profit_margin", 0.0),
+                    inventory_delta=sr_data.get("inventory_delta", 0.0),
+                    cost_delta=sr_data.get("cost_delta", 0.0),
+                    delay_delta=sr_data.get("delay_delta", 0.0),
+                    service_delta=sr_data.get("service_delta", 0.0),
+                    margin_delta=sr_data.get("margin_delta", 0.0),
+                    scores=sr_data.get("scores", {}),
+                    key_events=sr_data.get("key_events", []),
+                    summary=sr_data.get("summary", ""),
+                    recommendation=sr_data.get("recommendation", ""),
+                    risks=sr_data.get("risks", []),
+                ))
         else:
             sl = StrategyRepository().list_by_project(pid)
             gen = ReportGenerator()
             for s in sl:
                 rds = SimulationRoundRepository().list_by_strategy(s.id)
                 if rds:
-                    from core.world_state import WorldState
-                    gen.add_strategy_result(
-                        s.name, s.decision,
-                        [WorldState() for _ in rds],
-                    )
+                    states = []
+                    for rd in rds:
+                        ws = WorldState(
+                            round=rd.round_index,
+                            simulated_hour=rd.simulated_hour,
+                            inventory_level=rd.inventory_level,
+                            cost_index=rd.cost_index,
+                            delivery_delay=rd.delivery_delay,
+                            service_level=rd.service_level,
+                            profit_margin=rd.profit_margin,
+                            resilience_score=rd.resilience_score,
+                        )
+                        if rd.state_json:
+                            state_data = json.loads(rd.state_json)
+                            ws.key_events = [
+                                KeyEvent(**e) for e in state_data.get("key_events", [])
+                            ]
+                        states.append(ws)
+                    gen.add_strategy_result(s.name, s.decision, states)
             self._report = gen.generate()
         self._render()
 
