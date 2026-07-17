@@ -151,12 +151,12 @@ class NodeEditor(QWidget):
         row3 = QHBoxLayout()
         row3.addWidget(QLabel("上游节点"))
         up = QLineEdit(_format_refs(d.get("upstream", [])))
-        up.setPlaceholderText("名称, 逗号分隔")
+        up.setPlaceholderText("名称，逗号分隔")
         row3.addWidget(up)
 
         row3.addWidget(QLabel("下游节点"))
         down = QLineEdit(_format_refs(d.get("downstream", [])))
-        down.setPlaceholderText("名称, 逗号分隔")
+        down.setPlaceholderText("名称，逗号分隔")
         row3.addWidget(down)
         row3.addStretch()
         card.add_layout(row3)
@@ -253,7 +253,7 @@ class EventPage(QWidget):
 
         card.add(QLabel("供应链背景"))
         self._bg = QTextEdit()
-        self._bg.setPlaceholderText("描述供应链背景、结构和当前运行状况...")
+        self._bg.setPlaceholderText("描述供应链背景、结构和当前运行状况……")
         self._bg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         card.add(self._bg)
 
@@ -339,7 +339,7 @@ class EventPage(QWidget):
             try:
                 self._imported = import_documents(files)
                 self._save_btn.setText(
-                    f"已导入{len(self._imported)}个文档 — 保存并继续 →"
+                    f"已导入 {len(self._imported)} 个文档，保存并继续 →"
                 )
             except Exception as e:
                 self.log(f"导入失败：{e}", is_error=True)
@@ -348,7 +348,7 @@ class EventPage(QWidget):
     def _save(self):
         t = self._title.text().strip()
         if len(t) > 80:
-            self.log("名称不能超过 80 字", is_error=True)
+            self.log("名称请勿超过 80 字", is_error=True)
             return
 
         bg = self._bg.toPlainText().strip()

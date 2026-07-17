@@ -1,5 +1,4 @@
 """Prism — 供应链决策推演工具"""
-__version__ = "0.1.0"
 
 from typing import Any
 

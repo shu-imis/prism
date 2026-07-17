@@ -315,13 +315,24 @@ class SimulationEngine:
             rounds.append(next_state)
             ws = next_state
             messages = [turn.to_message() for turn in turns]
+
+            # 校验 AI 参与度，防止空转
+            all_skipped = active_agents and all(turn.skipped for turn in turns)
+            release_cycles = self._strategy_release_cycles(strategy)
+            round_expected = release_cycles is None or cycle in release_cycles
+
+            if all_skipped and round_expected:
+                if round_index == 1:
+                    raise RuntimeError(
+                        "首轮所有行为体均调用失败，请检查 LLM API Key 是否已配置"
+                    )
+                raise SimulationRecoverableError(
+                    f"方案 {strategy_index + 1} 第 {round_index} 轮所有激活行为体均调用失败或超时，已保存检查点"
+                )
+
             self._persist_round(strategy_index, ws, messages)
             self._save_checkpoint(strategy_index, ws, agents, rounds)
             self._emit_callbacks(strategy_index, strategy, ws, messages)
-            if active_agents and all(turn.skipped for turn in turns):
-                raise SimulationRecoverableError(
-                    f"方案 {strategy_index + 1} 第 {round_index} 轮所有激活行为体均调用失败或超时，已保存检查点。"
-                )
 
         return rounds
 
@@ -436,7 +447,7 @@ class SimulationEngine:
         scenario = self.state.scenario or Scenario()
         system_prompt = AGENT_RESPONSE_SYSTEM.format(
             agent_profile=agent.profile,
-            cycle=state.cycle,
+            cycle=state.simulated_hour,
             inventory_level=state.inventory_level,
             cost_index=state.cost_index,
             delivery_delay=state.delivery_delay,
@@ -620,14 +631,19 @@ class SimulationEngine:
         release_cycles = self._strategy_release_cycles(strategy)
         if release_cycles is not None and cycle not in release_cycles:
             return []
-        active: list[Agent] = []
         actor_filters = self._strategy_actor_filters(strategy)
-        for agent in agents:
-            if actor_filters and not self._agent_matches_strategy_actor(agent, actor_filters):
-                continue
-            active_cycles = set(agent.active_cycles or range(1, 13))
-            if cycle in active_cycles and self._rng.random() <= agent.activity:
+        candidates = [
+            agent for agent in agents
+            if (not actor_filters or self._agent_matches_strategy_actor(agent, actor_filters))
+            and cycle in set(agent.active_cycles or range(1, 13))
+        ]
+        active: list[Agent] = []
+        for agent in candidates:
+            if self._rng.random() <= agent.activity:
                 active.append(agent)
+        # 保底：至少激活一个行为体，避免整轮空转
+        if not active and candidates:
+            active = [max(candidates, key=lambda a: a.influence)]
         return active
 
     def _propagate_memory(self, agents: list[Agent], turns: list[AgentTurn]) -> None:
@@ -812,7 +828,7 @@ class SimulationEngine:
             inventory = clamp(float(raw.get("inventory", scenario.initial_inventory)), 0.0, 100.0)
             capacity = max(0.0, float(raw.get("capacity", 0.0)))
             lead_time = max(0.0, float(raw.get("lead_time", 0.0)))
-            cost_index = clamp(float(raw.get("cost_index", raw.get("cost", scenario.baseline_cost))), 0.0, 100.0)
+            cost_index = clamp(float(raw.get("cost_index", scenario.baseline_cost)), 0.0, 100.0)
             node = NodeState(
                 name=str(raw.get("name", "node")),
                 node_type=str(raw.get("type", "unknown")).strip().lower(),
@@ -1054,7 +1070,7 @@ class SimulationEngine:
                     f"inventory={node.get('inventory', 0)}, "
                     f"capacity={node.get('capacity', 0)}, "
                     f"lead_time={node.get('lead_time', 0)}, "
-                    f"cost_index={node.get('cost_index', node.get('cost', 50))}]"
+                    f"cost_index={node.get('cost_index', 50)}]"
                 )
         return "\n".join(lines)
 

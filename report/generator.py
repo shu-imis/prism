@@ -11,16 +11,6 @@ from typing import Any
 from core.world_state import WorldState
 from core import clamp
 
-# 预留：LLM 评分维度中英文映射
-SCORE_DIMENSION_MAP: dict[str, str] = {
-    "成本控制": "cost_control",
-    "交付稳定性": "delivery_stability",
-    "库存健康度": "inventory_health",
-    "风险抵御": "risk_resistance",
-    "协同效率": "collaboration_efficiency",
-    "可执行性": "executability",
-}
-
 
 @dataclass
 class StrategyReport:

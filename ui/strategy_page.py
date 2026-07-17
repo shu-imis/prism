@@ -167,7 +167,7 @@ class StrategyPage(QWidget):
         tr.addWidget(QLabel("生效周期"))
         rp = QLineEdit()
         rp.setText(d.get("release_cycle", ""))
-        rp.setPlaceholderText("如 1-4")
+        rp.setPlaceholderText("如：1-4")
         tr.addWidget(rp)
         tr.addStretch()
         card.add_layout(tr)

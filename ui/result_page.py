@@ -399,7 +399,7 @@ class ResultPage(QWidget):
                 row_idx, col_idx = divmod(i, cols)
                 self._node_grid.addWidget(card, row_idx, col_idx)
         else:
-            self._node_caption.setText("当前结果中还没有节点级状态可展示。")
+            self._node_caption.setText("当前结果中还没有节点级状态可展示")
 
     # --- 卡片构建 ---
 

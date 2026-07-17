@@ -144,7 +144,7 @@ class ProjectRepository:
             )
         project = self.get_by_id(int(cursor.lastrowid))
         if project is None:
-            raise RuntimeError("项目创建后无法读取。")
+            raise RuntimeError("项目创建后无法读取")
         return project
 
     def get_by_id(self, project_id: int) -> Optional[Project]:
@@ -259,6 +259,23 @@ class StrategyRepository:
         return [Strategy(**dict(row)) for row in rows]
 
     def replace_for_project(self, project_id: int, strategies: list[dict[str, Any]]) -> list[Strategy]:
+        # 如果方案内容未变，跳过删除以避免 CASCADE 清空仿真数据
+        existing = self.list_by_project(project_id)
+        if len(existing) == len(strategies):
+            same = True
+            for old, new in zip(existing, strategies):
+                if (
+                    old.name != str(new.get("name", "")).strip()
+                    or old.actor != str(new.get("actor", "")).strip()
+                    or old.decision != str(new.get("decision", "")).strip()
+                    or old.release_cycle != str(new.get("release_cycle", ""))
+                    or old.parameters != new.get("parameters", {})
+                ):
+                    same = False
+                    break
+            if same:
+                return existing
+
         with self.db.transaction() as conn:
             conn.execute("DELETE FROM strategies WHERE project_id = ?", (project_id,))
             ids: list[int] = []

@@ -433,7 +433,7 @@ class BackendModuleTests(unittest.TestCase):
         self.assertTrue(any(not message["metrics"]["skipped"] for message in flat_messages))
 
     def test_simulation_engine_all_agent_failure_saves_checkpoint(self) -> None:
-        """验证全部行为体失败时保存检查点并抛出异常。"""
+        """验证首轮全部行为体失败时抛致命异常，后续轮次失败时可恢复。"""
         with tempfile.TemporaryDirectory() as tmp:
             db = Database(Path(tmp) / "prism.db")
             db.migrate()
@@ -442,6 +442,7 @@ class BackendModuleTests(unittest.TestCase):
             round_repo = SimulationRoundRepository(db)
             checkpoint_repo = CheckpointRepository(db)
 
+            # 首轮全部失败 → 致命错误
             def failing_transport(provider, messages, options):
                 raise RuntimeError("provider unavailable")
 
@@ -462,12 +463,8 @@ class BackendModuleTests(unittest.TestCase):
                 checkpoint_repository=checkpoint_repo,
             )
 
-            with self.assertRaises(SimulationRecoverableError):
+            with self.assertRaises(RuntimeError):
                 engine.run()
-
-            latest = checkpoint_repo.latest_for_project(project.id)
-            self.assertIsNotNone(latest)
-            self.assertEqual(latest.last_round, 1)
             db.close()
 
     def test_simulation_engine_resumes_from_checkpoint(self) -> None:

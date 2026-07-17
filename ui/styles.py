@@ -171,7 +171,6 @@ QComboBox::down-arrow:on {{
 QComboBox QAbstractItemView {{
     background: {BG_SURFACE};
     border: 1px solid {BORDER};
-    selection-background-color: {BG_HOVER};
     min-width: 180px;
     max-height: 250px;
     outline: none;

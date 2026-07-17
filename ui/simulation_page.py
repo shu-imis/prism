@@ -37,10 +37,11 @@ from ui.widgets import (
 PRESETS = [
     {"label": "OpenAI", "proto": "openai", "url": "https://api.openai.com/v1", "model": "gpt-5.6-sol"},
     {"label": "Anthropic", "proto": "anthropic", "url": "https://api.anthropic.com", "model": "claude-fable-5"},
-    {"label": "DeepSeek", "proto": "openai", "url": "https://api.deepseek.com", "model": "deepseek-v4-pro"},
+    {"label": "DeepSeek", "proto": "openai", "url": "https://api.deepseek.com/v1", "model": "deepseek-v4-pro"},
     {"label": "通义千问", "proto": "openai", "url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen3.7-max"},
     {"label": "Kimi", "proto": "openai", "url": "https://api.moonshot.cn/v1", "model": "kimi-k2.7-code"},
     {"label": "智谱", "proto": "openai", "url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-5.2"},
+    {"label": "阶跃星辰", "proto": "openai", "url": "https://api.stepfun.com/step_plan/v1", "model": "step-3.7-flash"},
     {"label": "自定义", "proto": "openai", "url": "", "model": ""},
 ]
 
@@ -149,6 +150,13 @@ class SimWorker(QThread):
         except SimulationRecoverableError as e:
             self.recoverable.emit(str(e))
         except Exception as e:
+            # 致命错误：清除检查点，防止反复恢复
+            if self.pid:
+                try:
+                    db = Database(DB_PATH)
+                    CheckpointRepository(db).delete_for_project(self.pid)
+                except Exception:
+                    pass
             self.failed.emit(str(e))
 
 
@@ -311,10 +319,48 @@ class SimulationPage(QWidget):
     def load_project(self, pid):
         self._pid = pid
         self._reset()
+        self._load_history()
 
     def reset_for_new_project(self):
         self._pid = None
         self._reset()
+
+    def _load_history(self):
+        """从 DB 加载历史仿真轮次数据并回显到日志和指标卡。"""
+        if not self._pid:
+            return
+        strategies = StrategyRepository().list_by_project(self._pid)
+        if not strategies:
+            return
+        round_repo = SimulationRoundRepository()
+        has_data = False
+        last_round = None
+        for strategy in strategies:
+            rounds = round_repo.list_by_strategy(strategy.id)
+            if not rounds:
+                continue
+            has_data = True
+            self._log.append(f"  >  [方案：{strategy.name}]")
+            for r in rounds:
+                self._log.append(
+                    f"  >  [周期 {r.round_index}]  库存 {r.inventory_level:.0f}  "
+                    f"成本 {r.cost_index:.0f}  服务 {r.service_level:.0%}  "
+                    f"利润 {r.profit_margin:+.1%}"
+                )
+            if rounds:
+                last_round = rounds[-1]
+        if has_data and last_round:
+            self._mv["库存"].setText(f"{last_round.inventory_level:.1f}")
+            self._mv["成本"].setText(f"{last_round.cost_index:.1f}")
+            self._mv["服务水平"].setText(f"{last_round.service_level:.0%}")
+            self._mv["利润率"].setText(f"{last_round.profit_margin:+.1%}")
+            self._mv["交付延迟"].setText(f"{last_round.delivery_delay:.1f}")
+            self._bar.setValue(100)
+            self._st.setText("仿真已完成")
+            self._st.setVisible(True)
+            self._start.setText("✓ 已完成")
+            self._start.setEnabled(False)
+            self._running = False
 
     def _toggle(self):
         if self._running:
@@ -323,6 +369,25 @@ class SimulationPage(QWidget):
             self._running = False
             self._start.setText("▶ 继续")
             return
+
+        if self._worker:
+            try:
+                self._worker.pause()
+                try:
+                    self._worker.progress.disconnect()
+                    self._worker.round_done.disconnect()
+                    self._worker.finished.disconnect()
+                    self._worker.failed.disconnect()
+                    self._worker.recoverable.disconnect()
+                except RuntimeError:
+                    pass
+                try:
+                    self._worker.deleteLater()
+                except RuntimeError:
+                    pass
+            except RuntimeError:
+                pass
+            self._worker = None
 
         p = PRESETS[self._provider_index]
         self._worker = SimWorker(
@@ -334,8 +399,7 @@ class SimulationPage(QWidget):
             app_config.sim.max_rounds,
         )
         if self._pid:
-            db = Database()
-            cp_repo = CheckpointRepository(db)
+            cp_repo = CheckpointRepository()
             checkpoint = cp_repo.latest_for_project(self._pid)
             if checkpoint:
                 self._worker.set_checkpoint(checkpoint)
@@ -367,6 +431,10 @@ class SimulationPage(QWidget):
                 self._start.setEnabled(True),
             )
         )
+        # 工作线程结束后在主线程安全清理，避免 use-after-free 崩溃
+        self._worker.finished.connect(self._worker.deleteLater)
+        self._worker.failed.connect(self._worker.deleteLater)
+        self._worker.recoverable.connect(self._worker.deleteLater)
 
         self._running = True
         self._start.setText("⏸ 暂停")
@@ -409,6 +477,20 @@ class SimulationPage(QWidget):
                 if content:
                     self._log.append(f"    ↳  {agent_name}: {content}")
 
+    def stop_worker(self):
+        """安全停止工作线程，供主窗口关闭时调用。"""
+        if self._worker is None:
+            return
+        try:
+            self._worker.pause()
+            if self._worker.isRunning():
+                self._worker.quit()
+                if not self._worker.wait(3000):
+                    self._worker.terminate()
+                    self._worker.wait(2000)
+        except RuntimeError:
+            pass  # C++ 对象已被 deleteLater 清理
+
     def _reset(self):
         self._running = False
         self._bar.setValue(0)
@@ -418,3 +500,6 @@ class SimulationPage(QWidget):
         self._start.setEnabled(True)
         for v in self._mv.values():
             v.setText("—")
+        # 清除检查点，确保重置后从头仿真
+        if self._pid:
+            CheckpointRepository().delete_for_project(self._pid)

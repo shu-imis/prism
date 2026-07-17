@@ -15,6 +15,8 @@ from ui.simulation_page import SimulationPage
 from ui.strategy_page import StrategyPage
 from ui.styles import *
 from ui.widgets import Divider, PrimaryBtn, SecondaryBtn
+from db.models import ReportRepository, SimulationRoundRepository, StrategyRepository
+from report.exporter import ReportExporter
 
 
 class ProcessPage(QWidget):
@@ -22,6 +24,7 @@ class ProcessPage(QWidget):
         super().__init__(parent)
         self._pid = None
         self._step = 0
+        self._sim_done = False
         self._build()
         self._wire()
 
@@ -130,21 +133,66 @@ class ProcessPage(QWidget):
 
     def _on_saved(self, pid):
         self._pid = pid
-        self._p(f"项目已保存 （#{pid}）")
+        self._p(f"项目已保存（#{pid}）")
         self._advance()
 
     def _on_done(self, r, res):
         self._p("仿真已完成")
-        self._advance()
+        self._sim_done = True
+        self._update()
         self._rp.set_report(r, res)
+        # 持久化（主线程）
+        if self._pid:
+            try:
+                strategies = StrategyRepository().list_by_project(self._pid)
+                round_repo = SimulationRoundRepository()
+                for si, states in enumerate(res):
+                    if si >= len(strategies):
+                        break
+                    for ws in states:
+                        if ws.round == 0:
+                            continue
+                        round_repo.save(
+                            project_id=self._pid,
+                            strategy_id=strategies[si].id,
+                            round_index=ws.round,
+                            simulated_hour=ws.simulated_hour,
+                            inventory_level=ws.inventory_level,
+                            cost_index=ws.cost_index,
+                            delivery_delay=ws.delivery_delay,
+                            service_level=ws.service_level,
+                            profit_margin=ws.profit_margin,
+                            resilience_score=ws.resilience_score,
+                            state=ws.to_dict(),
+                            agent_messages=[],
+                        )
+                self._p("仿真数据已保存")
+
+                md = ReportExporter.to_markdown(r)
+                html = ReportExporter.export_html(r)
+                ReportRepository().save(
+                    project_id=self._pid,
+                    title=f"{r.project_name} - 供应链决策推演报告",
+                    markdown=md,
+                    html=html,
+                    summary=r.to_dict(),
+                )
+            except Exception as e:
+                self._p(f"数据保存失败：{e}")
 
     def _next_clicked(self):
         if self._step == 0:
             self._ep._save()
         elif self._step == 1:
-            self._sp._save()
+            if self._sim_done:
+                self._advance()
+            else:
+                self._sp._save()
         elif self._step == 2:
-            self._smp._toggle()
+            if self._sim_done:
+                self._advance()
+            else:
+                self._smp._toggle()
 
     def _prev(self):
         if self._step > 0:
@@ -177,7 +225,10 @@ class ProcessPage(QWidget):
         self._back.setVisible(self._step > 0)
 
         if self._step == 2:
-            self._next.setText("▶ 启动仿真")
+            if self._sim_done:
+                self._next.setText("下一步 →")
+            else:
+                self._next.setText("▶ 启动仿真")
             self._next.setVisible(True)
         elif self._step == 3:
             self._next.setVisible(False)
@@ -194,11 +245,22 @@ class ProcessPage(QWidget):
         self._update()
         self._log.clear()
         self._ep.load_project(pid)
-        self._p(f"项目已加载 （#{pid}）")
+        self._p(f"项目已加载（#{pid}）")
+        # 检查是否有已完成的历史仿真
+        reports = ReportRepository().list_by_project(pid)
+        self._sim_done = bool(reports)
+        if self._sim_done:
+            self._smp.load_project(pid)    # 预加载 Step 3 历史
+            self._rp.load_results(pid)     # 预加载 Step 4 报告
+
+    def stop_worker(self):
+        """安全停止仿真工作线程，供主窗口关闭时调用。"""
+        self._smp.stop_worker()
 
     def reset(self):
         self._pid = None
         self._step = 0
+        self._sim_done = False
         self._update()
         self._log.clear()
         self._ep.reset_for_new_project()

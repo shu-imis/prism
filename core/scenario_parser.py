@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from core import clamp
 
 
 @dataclass
@@ -57,7 +58,7 @@ class ScenarioParser:
             industry=industry,
             background=background,
             nodes=nodes or [],
-            initial_inventory=max(0.0, min(100.0, initial_inventory)),
-            baseline_cost=max(0.0, min(100.0, baseline_cost)),
-            baseline_service_level=max(0.0, min(1.0, baseline_service_level)),
+            initial_inventory=clamp(initial_inventory, 0.0, 100.0),
+            baseline_cost=clamp(baseline_cost, 0.0, 100.0),
+            baseline_service_level=clamp(baseline_service_level, 0.0, 1.0),
         )

@@ -24,7 +24,7 @@ def import_documents(paths: list[str | Path], max_total_chars: int = MAX_IMPORT_
     """从常见文档中提取文本，限制文件数量、大小和总字符数。"""
 
     if len(paths) > MAX_IMPORT_FILES:
-        raise ValueError(f"一次最多导入 {MAX_IMPORT_FILES} 个文档。")
+        raise ValueError(f"一次最多导入 {MAX_IMPORT_FILES} 个文档")
 
     imported: list[ImportedDocument] = []
     remaining = max_total_chars
@@ -36,7 +36,7 @@ def import_documents(paths: list[str | Path], max_total_chars: int = MAX_IMPORT_
         if suffix not in SUPPORTED_DOCUMENT_SUFFIXES:
             raise ValueError(f"不支持的文档类型: {path.name}")
         if path.stat().st_size > MAX_IMPORT_FILE_BYTES:
-            raise ValueError(f"文件过大: {path.name}，单个文件最多 10MB。")
+            raise ValueError(f"文件过大: {path.name}，单个文件最多 10MB")
 
         text = _read_document_text(path)
         text = _normalize_text(text)

@@ -45,14 +45,6 @@ class KeyEvent:
     service_delta: float = 0.0
     margin_delta: float = 0.0
 
-    @property
-    def cycle(self) -> int:
-        return self.simulated_hour
-
-    @cycle.setter
-    def cycle(self, value: int) -> None:
-        self.simulated_hour = int(value)
-
 
 @dataclass
 class WorldState:
@@ -69,18 +61,9 @@ class WorldState:
     agent_states: dict[int, AgentSnapshot] = field(default_factory=dict)
     node_states: list[NodeState] = field(default_factory=list)
 
-    @property
-    def cycle(self) -> int:
-        return self.simulated_hour
-
-    @cycle.setter
-    def cycle(self, value: int) -> None:
-        self.simulated_hour = int(value)
-
     def to_dict(self) -> dict:
         return {
             "round": self.round,
-            "cycle": self.cycle,
             "simulated_hour": self.simulated_hour,
             "inventory_level": self.inventory_level,
             "cost_index": self.cost_index,
@@ -131,10 +114,10 @@ class WorldState:
 
     @classmethod
     def from_dict(cls, data: dict) -> WorldState:
-        cycle = data.get("cycle", data.get("simulated_hour", 0))
+        simulated_hour = data.get("simulated_hour", 0)
         state = cls(
             round=data["round"],
-            simulated_hour=cycle,
+            simulated_hour=simulated_hour,
             inventory_level=data["inventory_level"],
             cost_index=data["cost_index"],
             delivery_delay=data["delivery_delay"],
@@ -170,7 +153,7 @@ class WorldState:
         state.node_states = [
             NodeState(
                 name=node.get("name", ""),
-                node_type=node.get("node_type", node.get("type", "")),
+                node_type=node.get("node_type", ""),
                 inventory=node.get("inventory", 0.0),
                 capacity=node.get("capacity", 0.0),
                 lead_time=node.get("lead_time", 0.0),

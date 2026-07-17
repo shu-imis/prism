@@ -111,7 +111,7 @@ class LLMClient:
                     )
                 )
         if not providers:
-            raise LLMError("未找到可用的 LLM API Key。请设置 OPENAI_API_KEY 或 ANTHROPIC_API_KEY。")
+            raise LLMError("未找到可用的 LLM API Key，请设置 OPENAI_API_KEY 或 ANTHROPIC_API_KEY")
         return cls(providers=providers)
 
     def chat(
@@ -161,7 +161,7 @@ class LLMClient:
                     else:
                         break
 
-        raise LLMError("所有已配置的 LLM 厂商均调用失败。", failures)
+        raise LLMError("所有已配置的 LLM 厂商均调用失败", failures)
 
     def chat_json(
         self,
@@ -181,7 +181,7 @@ class LLMClient:
         )
         parsed = parse_json_object(raw)
         if not isinstance(parsed, dict):
-            raise ValueError("LLM JSON 响应必须是对象。")
+            raise ValueError("LLM JSON 响应必须是对象")
         return parsed
 
     def _call_sdk(
@@ -281,7 +281,7 @@ def parse_json_object(raw: str) -> Any:
 
     candidate = _extract_balanced_json(cleaned)
     if not candidate:
-        raise ValueError(f"无法从 LLM 返回中定位 JSON: {raw[:200]}...")
+        raise ValueError(f"无法从 LLM 返回中定位 JSON: {raw[:200]}")
 
     candidate = re.sub(r",(\s*[}\]])", r"\1", candidate)
     return json.loads(candidate)

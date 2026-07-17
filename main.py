@@ -28,7 +28,7 @@ from PySide6.QtGui import QFontDatabase, QIcon
 
 from ui.main_window import MainWindow
 from db.database import Database
-
+from prism import __version__
 
 def main():
     # 高 DPI 支持
@@ -38,7 +38,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("Prism")
-    app.setApplicationVersion("0.1.0")
+    app.setApplicationVersion(__version__)
     app.setOrganizationName("Prism")
 
     # 应用图标（Dock / 任务栏）

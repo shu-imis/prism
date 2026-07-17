@@ -79,7 +79,7 @@ AGENT_TEMPLATES: list[dict] = [
         "decision_stance": "cautious",
         "influence": 1.0,
         "activity": 0.5,
-        "active_cycles": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "active_cycles": list(range(1, 13)),
         "profile": (
             "你是一家原材料供应商。你关注原材料价格波动、订单稳定性和下游需求变化。"
             "你的决策倾向偏保守（cautious），倾向于维持安全库存，在需求不确定时会减少供应承诺。"
@@ -107,7 +107,7 @@ AGENT_TEMPLATES: list[dict] = [
         "decision_stance": "cautious",
         "influence": 1.5,
         "activity": 0.6,
-        "active_cycles": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "active_cycles": list(range(1, 13)),
         "profile": (
             "你是一家区域分销商，承担库存缓冲角色。你受需求波动冲击较大。"
             "你的决策倾向偏保守（cautious），倾向于根据下游订单调整库存策略。"
@@ -135,7 +135,7 @@ AGENT_TEMPLATES: list[dict] = [
         "decision_stance": "cooperative",
         "influence": 1.2,
         "activity": 0.5,
-        "active_cycles": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "active_cycles": list(range(1, 13)),
         "profile": (
             "你是一家第三方物流服务商。运输时效与成本是你关注的关键变量。"
             "你的决策倾向偏协作（cooperative），倾向于根据运力情况调整服务承诺。"

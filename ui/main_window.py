@@ -107,6 +107,11 @@ class MainWindow(QMainWindow):
         for i, btn in self._btns.items():
             btn.setChecked(i == idx)
 
+    def closeEvent(self, event):
+        """窗口关闭前安全停止工作线程，避免 PySide6 QThread 析构崩溃。"""
+        self._process.stop_worker()
+        super().closeEvent(event)
+
     def _center(self):
         g = self.screen().availableGeometry()
         self.move((g.width() - self.width()) // 2, (g.height() - self.height()) // 2)
