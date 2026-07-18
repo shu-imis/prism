@@ -49,7 +49,10 @@ PRESETS = [
 class SimWorker(QThread):
     progress = Signal(int, int, str)
     round_done = Signal(dict)
-    finished = Signal(object, list)
+    # 注意：不能定义名为 finished 的信号，会覆盖 QThread.finished(void)。
+    # QThread.finished 由 Qt 在 run() 返回后自动发射，用于触发线程清理；
+    # 被覆盖会导致 Qt6Core 内部状态机错乱，触发 __fastfail(FAST_FAIL_FATAL_APP_EXIT)。
+    succeeded = Signal(object, list)
     failed = Signal(str)
     recoverable = Signal(str)      # 中断但可恢复
 
@@ -62,6 +65,7 @@ class SimWorker(QThread):
         self.model = model
         self.rounds = rounds
         self._paused = False
+        self._cancelled = False
         self._checkpoint = None
 
     def set_checkpoint(self, checkpoint):
@@ -72,6 +76,15 @@ class SimWorker(QThread):
 
     def resume(self):
         self._paused = False
+
+    def cancel(self):
+        """请求取消（协作式，由主线程调用）。
+
+        不打断进行中的仿真：engine.run() 返回后检查到取消标志，
+        跳过报告生成与结果发射，直接结束线程。
+        """
+        self._cancelled = True
+        self._paused = True
 
     def run(self):
         try:
@@ -137,6 +150,9 @@ class SimWorker(QThread):
             )
 
             results = engine.run()
+            # 发射结果前检查是否被取消：取消则直接返回，让 QThread.finished 自然触发清理
+            if self._cancelled:
+                return
             gen = ReportGenerator(
                 proj.name if proj else "",
                 sc.background if sc else "",
@@ -146,7 +162,7 @@ class SimWorker(QThread):
                 dc = strategies[si]["decision"] if si < len(strategies) else ""
                 gen.add_strategy_result(nm, dc, sr)
 
-            self.finished.emit(gen.generate(), results)
+            self.succeeded.emit(gen.generate(), results)
         except SimulationRecoverableError as e:
             self.recoverable.emit(str(e))
         except Exception as e:
@@ -158,6 +174,8 @@ class SimWorker(QThread):
                 except Exception:
                     pass
             self.failed.emit(str(e))
+        # run() 返回后 QThread 自动发射 finished(void) 信号，由主线程的
+        # _on_worker_finished 槽断开信号连接；对象在下一次 _dispose_worker 时回收。
 
 
 class SimulationPage(QWidget):
@@ -370,24 +388,9 @@ class SimulationPage(QWidget):
             self._start.setText("▶ 继续")
             return
 
-        if self._worker:
-            try:
-                self._worker.pause()
-                try:
-                    self._worker.progress.disconnect()
-                    self._worker.round_done.disconnect()
-                    self._worker.finished.disconnect()
-                    self._worker.failed.disconnect()
-                    self._worker.recoverable.disconnect()
-                except RuntimeError:
-                    pass
-                try:
-                    self._worker.deleteLater()
-                except RuntimeError:
-                    pass
-            except RuntimeError:
-                pass
-            self._worker = None
+        # 替换旧 worker 前必须等其线程真正结束，否则对运行中的 QThread
+        # 调用 disconnect/deleteLater 会触发 use-after-free 崩溃。
+        self._dispose_worker()
 
         p = PRESETS[self._provider_index]
         self._worker = SimWorker(
@@ -406,39 +409,88 @@ class SimulationPage(QWidget):
                 self.log("检测到检查点，从断点恢复", is_error=False)
         self._worker.progress.connect(self._on_progress)
         self._worker.round_done.connect(self._on_round)
-        self._worker.finished.connect(
-            lambda r, res: (
-                setattr(self, "_running", False),
-                self._bar.setValue(100),
-                self._start.setText("✓ 完成"),
-                self._start.setEnabled(False),
-                self.simulation_completed.emit(r, res),
-            )
-        )
-        self._worker.failed.connect(
-            lambda m: (
-                setattr(self, "_running", False),
-                self.log(m, is_error=True),
-                self._start.setText("▶ 重试"),
-                self._start.setEnabled(True),
-            )
-        )
-        self._worker.recoverable.connect(
-            lambda m: (
-                setattr(self, "_running", False),
-                self.log(m, is_error=True),
-                self._start.setText("↺ 恢复"),
-                self._start.setEnabled(True),
-            )
-        )
-        # 工作线程结束后在主线程安全清理，避免 use-after-free 崩溃
-        self._worker.finished.connect(self._worker.deleteLater)
-        self._worker.failed.connect(self._worker.deleteLater)
-        self._worker.recoverable.connect(self._worker.deleteLater)
+        self._worker.succeeded.connect(self._on_succeeded)
+        self._worker.failed.connect(self._on_failed)
+        self._worker.recoverable.connect(self._on_recoverable)
+        # 关键：连接 QThread 内置的 finished(void) 信号（run() 返回后由 Qt
+        # 自动发射）做安全清理。不要连到 succeeded/failed/recoverable 上，
+        # 因为那些信号发射时线程可能还在执行后续代码。
+        self._worker.finished.connect(self._on_worker_finished)
 
         self._running = True
         self._start.setText("⏸ 暂停")
         self._worker.start()
+
+    def _dispose_worker(self):
+        """同步等待旧 worker 线程结束后安全清理。调用方在主线程。"""
+        w = self._worker
+        if w is None:
+            return
+        try:
+            w.cancel()
+            if w.isRunning():
+                w.quit()
+                # 协作式等待：给足时间让网络请求完成，避免 terminate 导致 Qt 崩溃
+                if not w.wait(5000):
+                    # 最后一招：线程卡死时强制终止。仅在替换/重置场景使用，
+                    # 仍有风险但优于对运行中的 QThread 做 deleteLater。
+                    w.terminate()
+                    w.wait(2000)
+        except RuntimeError:
+            pass  # C++ 对象已被 deleteLater 清理
+        try:
+            w.progress.disconnect()
+            w.round_done.disconnect()
+            w.succeeded.disconnect()
+            w.failed.disconnect()
+            w.recoverable.disconnect()
+            w.finished.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            w.deleteLater()
+        except RuntimeError:
+            pass
+        self._worker = None
+
+    def _on_worker_finished(self):
+        """QThread.run() 返回后在主线程安全断开信号连接。
+
+        此时线程已真正结束，disconnect 不会引发 use-after-free。
+        对象本身留待下一次 _dispose_worker 时通过 deleteLater 回收。
+        """
+        w = self._worker
+        if w is None:
+            return
+        try:
+            w.progress.disconnect()
+            w.round_done.disconnect()
+            w.succeeded.disconnect()
+            w.failed.disconnect()
+            w.recoverable.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        # 注意：不在此处置 self._worker = None，否则 _toggle 重启时无法
+        # 调用 _dispose_worker 等待旧线程。deleteLater 足以保证对象回收。
+
+    def _on_succeeded(self, report, results):
+        self._running = False
+        self._bar.setValue(100)
+        self._start.setText("✓ 完成")
+        self._start.setEnabled(False)
+        self.simulation_completed.emit(report, results)
+
+    def _on_failed(self, msg):
+        self._running = False
+        self.log(msg, is_error=True)
+        self._start.setText("▶ 重试")
+        self._start.setEnabled(True)
+
+    def _on_recoverable(self, msg):
+        self._running = False
+        self.log(msg, is_error=True)
+        self._start.setText("↺ 恢复")
+        self._start.setEnabled(True)
 
     def _on_progress(self, current, total, message):
         if total:
@@ -478,16 +530,22 @@ class SimulationPage(QWidget):
                     self._log.append(f"    ↳  {agent_name}: {content}")
 
     def stop_worker(self):
-        """安全停止工作线程，供主窗口关闭时调用。"""
+        """安全停止工作线程，供主窗口关闭时调用。
+
+        采用协作式取消：先设取消标志，再 quit + wait。仅当线程卡死
+        超时才用 terminate 作为最后手段（仍有风险但窗口正在关闭别无选择）。
+        """
         if self._worker is None:
             return
+        w = self._worker
         try:
-            self._worker.pause()
-            if self._worker.isRunning():
-                self._worker.quit()
-                if not self._worker.wait(3000):
-                    self._worker.terminate()
-                    self._worker.wait(2000)
+            w.cancel()
+            if w.isRunning():
+                w.quit()
+                # 给足时间让 LLM 网络请求完成，避免 terminate 导致 Qt 崩溃
+                if not w.wait(8000):
+                    w.terminate()
+                    w.wait(2000)
         except RuntimeError:
             pass  # C++ 对象已被 deleteLater 清理
 
