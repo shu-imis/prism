@@ -7,7 +7,6 @@
 # 构建产物
 dist/
 build/
-*.spec
 __pycache__/
 *.pyc
 

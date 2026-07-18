@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,7 +14,26 @@ from pathlib import Path
 # 路径常量
 # ============================================================
 ROOT_DIR = Path(__file__).parent
-DB_PATH = ROOT_DIR / "prism.db"
+
+
+def _default_db_path() -> Path:
+    """数据库文件位置。
+
+    开发时放在项目根目录；PyInstaller 冻结后改用各平台用户数据目录，
+    避免写入 .app 包内 / 安装目录（可能只读，且升级时会被覆盖）。
+    """
+    if not getattr(sys, "frozen", False):
+        return ROOT_DIR / "prism.db"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Prism" / "prism.db"
+    if sys.platform == "win32":
+        appdata = os.getenv("APPDATA")
+        base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        return base / "Prism" / "prism.db"
+    return Path.home() / ".local" / "share" / "Prism" / "prism.db"
+
+
+DB_PATH = _default_db_path()
 
 
 # ============================================================

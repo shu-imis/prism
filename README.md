@@ -31,6 +31,29 @@ cp .env.example .env    # 编辑 .env，填入 LLM API Key
 python main.py
 ```
 
+## 桌面端打包（GitHub Actions）
+
+推送版本标签即可自动构建 macOS / Windows 安装包并发布到 GitHub Releases：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+也可以在 Actions 页面手动运行 **Build Desktop Apps** workflow，或在推送到 main 时自动做验证构建（产物以 Artifact 形式提供）。
+
+产物：
+
+- macOS：`prism-macos-arm64.dmg`（Apple Silicon）
+- Windows：`prism-windows-x64.zip`（解压后运行 `Prism/prism.exe`）
+
+注意事项：
+
+- 应用**未做代码签名/公证**。macOS 首次打开请右键 → 打开（或执行 `xattr -dr com.apple.quarantine /Applications/Prism.app`）；Windows SmartScreen 提示时选择「仍要运行」。如需签名，需额外配置 Apple Developer 证书等 secrets 并扩展 `.github/workflows/build.yml`。
+- 数据库存放于用户数据目录：macOS `~/Library/Application Support/Prism/`，Windows `%APPDATA%/Prism/`。
+- 打包后的应用按「用户数据目录 → exe 同目录 → 运行目录」顺序查找并加载首个 `.env`（参照 `.env.example` 填写 API Key），推荐放在上述用户数据目录。
+- 本地打包：`pip install pyinstaller && pyinstaller prism.spec --noconfirm`（macOS 产出 `dist/Prism.app`，Windows 产出 `dist/Prism/`）。
+
 ## 技术栈
 
 | 用途 | 技术 |
