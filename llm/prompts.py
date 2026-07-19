@@ -28,12 +28,14 @@ AGENT_RESPONSE_SYSTEM = """你正在参与一场供应链决策推演仿真，�
 最近关键事件：
 {recent_events}
 
-最近记忆：
-{memory}
+其他行为体的最新行动（来自更早轮次；同一轮的行动互相不可见。已按供应链链路筛选出你的上下游邻居，以及全链高影响力行动）：
+{observation}
 
-请以你的角色视角，对当前供应链状态做出响应。结合用户消息中的供应链场景、决策方案、相关节点和知识上下文，返回 JSON 对象，不要输出额外说明。
+请以你的角色视角，对当前供应链状态做出响应。结合用户消息中的供应链场景、相关节点和知识上下文，并针对上面其他行为体的行动做出反应（支持、反对、跟随或反制；若没有与你相关的行动，则按自身状态独立判断）。返回 JSON 对象，不要输出额外说明。
 
 {{
+  "action_type": "maintain(维持现状)|adjust_supply(调整供应/采购量)|adjust_price(调价/促销)|adjust_capacity(产能/库存策略调整)|expedite_logistics(物流加急/改道)|reduce_orders(削减订单)|shift_demand(需求转移/抵制)|intervene(监管介入)",
+  "reaction_to": "你的行动所回应的行为体名称；自主决策则填 none",
   "inventory_change": float,
   "cost_change": float,
   "delay_change": float,

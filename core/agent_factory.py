@@ -50,6 +50,26 @@ class AgentFactory:
         return agents
 
     @staticmethod
+    def apply_overrides(agents: list[Agent], agents_config: dict | None) -> list[Agent]:
+        """按行为体 id 应用性格覆盖（stance/activity/influence/profile），返回 agents。"""
+        if not agents_config:
+            return agents
+        for agent in agents:
+            config = agents_config.get(str(agent.id))
+            if not config:
+                continue
+            if "stance" in config:
+                agent.decision_stance = config["stance"]
+                agent.base_stance = config["stance"]
+            if "activity" in config:
+                agent.activity = config["activity"]
+            if "influence" in config:
+                agent.influence = config["influence"]
+            if "profile" in config:
+                agent.profile = config["profile"]
+        return agents
+
+    @staticmethod
     def get_template(agent_id: int) -> dict | None:
         """获取指定 ID 的行为体模板"""
         for tmpl in AGENT_TEMPLATES:

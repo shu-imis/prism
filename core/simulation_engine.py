@@ -4,11 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import random
-import re
 import time
 from typing import Any, Callable, Optional
 
 from config import app_config
+from core.action_feed import ActionFeed, ActionRecord
 from core.agent import Agent
 from core.events import EventDetector
 from core.scenario_parser import Scenario
@@ -36,6 +36,32 @@ VALID_DECISION_SHIFTS = {
     "toward_defensive",
 }
 
+# 行为体行动空间（MiroFish/OASIS 式受限动作）：LLM 每轮必须从中选择行动类型
+ACTION_TYPES = {
+    "maintain",            # 维持现状
+    "adjust_supply",       # 调整供应/采购量
+    "adjust_price",        # 调价/促销
+    "adjust_capacity",     # 产能/库存策略调整
+    "expedite_logistics",  # 物流加急/改道
+    "reduce_orders",       # 削减订单
+    "shift_demand",        # 需求转移/抵制
+    "intervene",           # 监管介入
+}
+
+# 各行为体允许的行动子集；越权或非法值降级为 maintain
+AGENT_ALLOWED_ACTIONS: dict[int, set[str]] = {
+    1: {"maintain", "adjust_supply", "adjust_price", "reduce_orders"},
+    2: {"maintain", "adjust_supply", "adjust_capacity", "reduce_orders", "expedite_logistics"},
+    3: {"maintain", "adjust_supply", "adjust_capacity", "reduce_orders"},
+    4: {"maintain", "adjust_price", "adjust_supply", "reduce_orders"},
+    5: {"maintain", "expedite_logistics", "adjust_capacity"},
+    6: {"maintain", "shift_demand", "reduce_orders"},
+    7: {"maintain", "intervene"},
+}
+
+# 场景未定义节点链路时的类型级兜底链（与 AGENT_NODE_TYPES 主链一致）
+_FALLBACK_TYPE_CHAIN = ("supplier", "manufacturer", "distributor", "retailer", "consumer")
+
 
 class SimStatus(str, Enum):
     """仿真运行状态。"""
@@ -53,8 +79,7 @@ class SimulationConfig:
     """单次仿真的运行配置。"""
 
     max_rounds: int = 12
-    cycles_per_round: int = 1
-    strategies: list[dict[str, Any]] = field(default_factory=list)
+    seed_events: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -65,13 +90,11 @@ class SimulationState:
     status: SimStatus = SimStatus.IDLE
     current_round: int = 0
     total_rounds: int = 0
-    strategy_index: int = 0
-    strategy_results: list[list[WorldState]] = field(default_factory=list)
     agents: list[Agent] = field(default_factory=list)
     scenario: Optional[Scenario] = None
     error_message: str = ""
     project_id: int | None = None
-    strategy_records: list[Any] = field(default_factory=list)
+    simulation_record: Any = None
     round_repository: SimulationRoundRepository | None = None
     checkpoint_repository: CheckpointRepository | None = None
     knowledge_repository: KnowledgeRepository | None = None
@@ -97,6 +120,8 @@ class AgentTurn:
     decision_shift: str = "none"
     risk_description: str = ""
     response_summary: str = ""
+    action_type: str = "maintain"
+    reaction_to: str = "none"
     skipped: bool = False
     error_message: str = ""
     warning: str = ""
@@ -109,6 +134,8 @@ class AgentTurn:
             "role": self.role,
             "decision_stance": self.decision_stance,
             "content": self.speech,
+            "action_type": self.action_type,
+            "reaction_to": self.reaction_to,
             "metrics": {
                 "inventory_change": self.inventory_change,
                 "cost_change": self.cost_change,
@@ -126,7 +153,7 @@ class AgentTurn:
         }
 
 
-RoundCallback = Callable[[int, dict[str, Any], WorldState, list[dict[str, Any]]], None]
+RoundCallback = Callable[[WorldState, list[dict[str, Any]]], None]
 
 
 class SimulationRecoverableError(RuntimeError):
@@ -134,7 +161,7 @@ class SimulationRecoverableError(RuntimeError):
 
 
 class SimulationEngine:
-    """管理多方案、多轮、多行为体的真实 LLM 推演生命周期。"""
+    """管理单一世界、多轮、多行为体的真实 LLM 推演生命周期。"""
 
     def __init__(self, llm_client: LLMClient | None = None, random_seed: int = 42):
         self.state = SimulationState()
@@ -149,11 +176,11 @@ class SimulationEngine:
         self,
         agents: list[Agent],
         scenario: Scenario,
-        strategies: list[dict[str, Any]],
-        max_rounds: int | None = None,
         *,
+        seed_events: list[dict[str, Any]] | None = None,
+        max_rounds: int | None = None,
         project_id: int | None = None,
-        strategy_records: list[Any] | None = None,
+        simulation_record: Any = None,
         round_repository: SimulationRoundRepository | None = None,
         checkpoint_repository: CheckpointRepository | None = None,
         knowledge_repository: KnowledgeRepository | None = None,
@@ -164,16 +191,14 @@ class SimulationEngine:
 
         self.state.config = SimulationConfig(
             max_rounds=max_rounds or app_config.sim.max_rounds,
-            cycles_per_round=1,
-            strategies=strategies,
+            seed_events=list(seed_events or []),
         )
         self.state.agents = agents
         self.state.scenario = scenario
-        self.state.total_rounds = self.state.config.max_rounds * len(strategies)
-        self.state.strategy_results = []
+        self.state.total_rounds = self.state.config.max_rounds
         self.state.status = SimStatus.IDLE
         self.state.project_id = project_id
-        self.state.strategy_records = list(strategy_records or [])
+        self.state.simulation_record = simulation_record
         self.state.round_repository = round_repository
         self.state.checkpoint_repository = checkpoint_repository
         self.state.knowledge_repository = knowledge_repository
@@ -190,31 +215,16 @@ class SimulationEngine:
         """设置轮次回调 —— 用于 UI 展示每轮状态和行为体响应。"""
         self._round_callback = callback
 
-    def run(self) -> list[list[WorldState]]:
+    def run(self) -> list[WorldState]:
         """运行完整仿真（同步模式，UI 应放在线程中调用）。"""
 
-        if not self.state.config.strategies:
-            raise ValueError("至少需要配置一个决策方案。")
         if not self.state.agents:
             raise ValueError("至少需要配置一个行为体。")
 
         self.state.status = SimStatus.RUNNING
-        self.state.strategy_results = self._resume_strategy_results()
 
         try:
-            start_strategy = self._resume_strategy_index()
-            for strategy_index in range(start_strategy, len(self.state.config.strategies)):
-                strategy = self.state.config.strategies[strategy_index]
-                self.state.strategy_index = strategy_index
-                if self.state.status == SimStatus.ABORTED:
-                    break
-
-                rounds = self._run_strategy_simulation(strategy_index, strategy)
-                if len(self.state.strategy_results) > strategy_index:
-                    self.state.strategy_results[strategy_index] = rounds
-                else:
-                    self.state.strategy_results.append(rounds)
-
+            rounds = self._run_simulation()
             if self.state.status != SimStatus.ABORTED:
                 self.state.status = SimStatus.COMPLETED
                 self._delete_checkpoints()
@@ -224,12 +234,12 @@ class SimulationEngine:
             self.state.error_message = str(exc)
             raise
 
-        return self.state.strategy_results
+        return rounds
 
-    def _run_strategy_simulation(self, strategy_index: int, strategy: dict[str, Any]) -> list[WorldState]:
+    def _run_simulation(self) -> list[WorldState]:
         max_rounds = self.state.config.max_rounds
         detector = EventDetector()
-        resume = self._resume_for_strategy(strategy_index)
+        resume = self._resume_payload
         if resume:
             agents = [Agent.from_dict(item) for item in resume.get("agents", [])]
             rounds = [WorldState.from_dict(item) for item in resume.get("current_rounds", [])]
@@ -240,18 +250,22 @@ class SimulationEngine:
             rounds = [self._initial_world_state(agents)]
             ws = rounds[0]
             start_round = 1
-            self._persist_round(strategy_index, ws, [])
-            self._save_checkpoint(strategy_index, ws, agents, rounds)
+            self._persist_round(ws, [])
+            self._save_checkpoint(ws, agents, rounds)
+
+        # 行动信息流：行为体互动的共享载体。检查点恢复时从空开始，
+        # 首轮观察降级为"暂无"，随后续轮次逐轮重建（不改变 checkpoint schema）
+        feed = ActionFeed()
 
         for round_index in range(start_round, max_rounds + 1):
             self._wait_if_paused()
             if self.state.status == SimStatus.ABORTED:
-                self._save_checkpoint(strategy_index, ws, agents, rounds)
+                self._save_checkpoint(ws, agents, rounds)
                 break
 
             round_started = time.monotonic()
-            cycle = round_index
-            active_agents = self._select_active_agents(agents, round_index, strategy)
+            self._inject_seed_events(feed, round_index)
+            active_agents = self._select_active_agents(agents, round_index)
 
             turns: list[AgentTurn] = []
             for agent in active_agents:
@@ -262,7 +276,7 @@ class SimulationEngine:
                     turns.append(self._skipped_turn(agent, "本轮超过最大耗时，已跳过剩余行为体。", warning="round_timeout"))
                     continue
                 try:
-                    turn = self._generate_agent_turn(agent, ws, strategy)
+                    turn = self._generate_agent_turn(agent, ws, feed=feed, agents=agents)
                     self._apply_agent_turn(agent, turn)
                 except Exception as exc:  # noqa: BLE001 - LLM SDK 错误类型不统一
                     turn = self._skipped_turn(agent, str(exc))
@@ -299,7 +313,7 @@ class SimulationEngine:
                 agents=agents,
                 turns=turns,
                 round_index=round_index,
-                cycle=cycle,
+                cycle=round_index,
             )
             events = detector.detect(
                 next_state,
@@ -310,7 +324,30 @@ class SimulationEngine:
             )
             self._apply_events(next_state, agents, events)
             self._apply_bullwhip_effect(agents)
-            self._propagate_memory(agents, turns)
+
+            # 本轮行动写入共享信息流，供后续轮次的行为体观察（同步更新语义：
+            # 同轮行为体互不可见，反应链跨轮形成，与 MiroFish/OASIS 一致）
+            feed.append(
+                ActionRecord(
+                    round=round_index,
+                    agent_id=turn.agent_id,
+                    agent_name=turn.agent_name,
+                    role=turn.role,
+                    action_type=turn.action_type,
+                    content=turn.response_summary,
+                    metrics={
+                        "inventory_change": turn.inventory_change,
+                        "cost_change": turn.cost_change,
+                        "delay_change": turn.delay_change,
+                        "service_change": turn.service_change,
+                        "margin_change": turn.margin_change,
+                    },
+                    influence=self._agent_by_id(agents, turn.agent_id).influence,
+                    reaction_to=turn.reaction_to,
+                )
+                for turn in turns
+                if not turn.skipped and turn.response_summary
+            )
 
             rounds.append(next_state)
             ws = next_state
@@ -318,23 +355,49 @@ class SimulationEngine:
 
             # 校验 AI 参与度，防止空转
             all_skipped = active_agents and all(turn.skipped for turn in turns)
-            release_cycles = self._strategy_release_cycles(strategy)
-            round_expected = release_cycles is None or cycle in release_cycles
 
-            if all_skipped and round_expected:
+            if all_skipped:
                 if round_index == 1:
                     raise RuntimeError(
                         "首轮所有行为体均调用失败，请检查 LLM API Key 是否已配置"
                     )
                 raise SimulationRecoverableError(
-                    f"方案 {strategy_index + 1} 第 {round_index} 轮所有激活行为体均调用失败或超时，已保存检查点"
+                    f"第 {round_index} 轮所有激活行为体均调用失败或超时，已保存检查点"
                 )
 
-            self._persist_round(strategy_index, ws, messages)
-            self._save_checkpoint(strategy_index, ws, agents, rounds)
-            self._emit_callbacks(strategy_index, strategy, ws, messages)
+            self._persist_round(ws, messages)
+            self._save_checkpoint(ws, agents, rounds)
+            self._emit_callbacks(ws, messages)
 
         return rounds
+
+    def _inject_seed_events(self, feed: ActionFeed, cycle: int) -> None:
+        """注入种子事件 —— MiroFish initial_posts 式的世界干预。
+
+        在当轮行为体行动前写入共享信息流，当轮即可被观察；
+        influence=2.5 超过全链广播阈值，保证非邻居行为体同样可见。
+        """
+        for event in self.state.config.seed_events:
+            content = str(event.get("content", "")).strip()
+            try:
+                event_cycle = int(event.get("cycle", 1))
+            except (TypeError, ValueError):
+                continue
+            if event_cycle != cycle or not content:
+                continue
+            feed.append(
+                [
+                    ActionRecord(
+                        round=cycle,
+                        agent_id=0,
+                        agent_name="世界事件",
+                        role=str(event.get("actor", "") or "外部干预"),
+                        action_type="seed",
+                        content=content,
+                        influence=2.5,
+                    )
+                ]
+            )
 
     def _ensure_llm_client(self) -> LLMClient:
         if self.llm_client is None:
@@ -369,55 +432,28 @@ class SimulationEngine:
             node_states=node_states,
         )
 
-    def _resume_strategy_index(self) -> int:
-        if not self._resume_payload:
-            return 0
-        return int(self._resume_payload.get("strategy_index", 0))
-
-    def _resume_strategy_results(self) -> list[list[WorldState]]:
-        if not self._resume_payload:
-            return []
-        return [
-            [WorldState.from_dict(item) for item in strategy_rounds]
-            for strategy_rounds in self._resume_payload.get("strategy_results", [])
-        ]
-
-    def _resume_for_strategy(self, strategy_index: int) -> dict[str, Any] | None:
-        if not self._resume_payload:
-            return None
-        if int(self._resume_payload.get("strategy_index", -1)) != strategy_index:
-            return None
-        return self._resume_payload
-
     def _save_checkpoint(
         self,
-        strategy_index: int,
         state: WorldState,
         agents: list[Agent],
         current_rounds: list[WorldState],
     ) -> None:
         repo = self.state.checkpoint_repository
         project_id = self.state.project_id
-        strategy_id = self._strategy_record_id(strategy_index)
-        if not repo or project_id is None or strategy_id is None:
+        simulation_id = self._simulation_record_id()
+        if not repo or project_id is None or simulation_id is None:
             return
-        strategy_results = [
-            [round_state.to_dict() for round_state in strategy_rounds]
-            for strategy_rounds in self.state.strategy_results[:strategy_index]
-        ]
         engine_state = {
-            "strategy_index": strategy_index,
             "last_round": state.round,
             "agents": [agent.to_dict() for agent in agents],
             "current_rounds": [round_state.to_dict() for round_state in current_rounds],
-            "strategy_results": strategy_results,
             "scenario": self.state.scenario.to_dict() if self.state.scenario else {},
-            "strategies": self.state.config.strategies,
+            "seed_events": self.state.config.seed_events,
             "max_rounds": self.state.config.max_rounds,
         }
         repo.save(
             project_id=project_id,
-            strategy_id=strategy_id,
+            simulation_id=simulation_id,
             last_round=state.round,
             engine_state=engine_state,
         )
@@ -443,8 +479,15 @@ class SimulationEngine:
             warning=warning,
         )
 
-    def _generate_agent_turn(self, agent: Agent, state: WorldState, strategy: dict[str, Any]) -> AgentTurn:
+    def _generate_agent_turn(
+        self,
+        agent: Agent,
+        state: WorldState,
+        feed: ActionFeed,
+        agents: list[Agent],
+    ) -> AgentTurn:
         scenario = self.state.scenario or Scenario()
+        observation = self._build_observation(agent, agents, feed, state)
         system_prompt = AGENT_RESPONSE_SYSTEM.format(
             agent_profile=agent.profile,
             cycle=state.simulated_hour,
@@ -456,17 +499,13 @@ class SimulationEngine:
             pressure=agent.pressure,
             capacity=agent.capacity,
             recent_events=self._format_recent_events(state),
-            memory="\n".join(agent.memory[-5:]) or "暂无",
+            observation=observation,
         )
         user_message = "\n".join(
             [
                 f"supply_chain={scenario.title}",
                 f"industry={scenario.industry}",
                 f"background={scenario.background}",
-                f"strategy_name={self._strategy_value(strategy, 'name', '')}",
-                f"strategy_actor={self._strategy_value(strategy, 'actor', 'all')}",
-                f"release_cycle={self._strategy_value(strategy, 'release_cycle', 'all')}",
-                f"strategy_decision={self._strategy_value(strategy, 'decision', '')}",
                 "current_metrics:",
                 self._format_current_metrics(state),
                 "all_nodes:",
@@ -474,7 +513,7 @@ class SimulationEngine:
                 "relevant_nodes:",
                 self._format_nodes_summary(state=state, agent=agent, relevant_only=True),
                 "knowledge_context:",
-                self._retrieve_knowledge_context(agent, state, strategy),
+                self._retrieve_knowledge_context(agent, state),
                 "Return JSON only.",
             ]
         )
@@ -496,6 +535,13 @@ class SimulationEngine:
         decision_shift = str(data.get("decision_shift", "none"))
         if decision_shift not in VALID_DECISION_SHIFTS:
             raise ValueError(f"不支持的 decision_shift：{decision_shift}")
+        action_type = str(data.get("action_type", "maintain")).strip() or "maintain"
+        allowed_actions = AGENT_ALLOWED_ACTIONS.get(agent.id, ACTION_TYPES)
+        warning = ""
+        if action_type not in ACTION_TYPES or action_type not in allowed_actions:
+            warning = f"action_type={action_type} 非法或超出角色行动空间，已降级为 maintain"
+            action_type = "maintain"
+        reaction_to = str(data.get("reaction_to", "none")).strip() or "none"
         return AgentTurn(
             agent_id=agent.id,
             agent_name=agent.name,
@@ -511,6 +557,9 @@ class SimulationEngine:
             decision_shift=decision_shift,
             risk_description=str(data.get("risk_description", "")).strip(),
             response_summary=str(data.get("response_summary", "")).strip(),
+            action_type=action_type,
+            reaction_to=reaction_to,
+            warning=warning,
         )
 
     def _build_next_state(
@@ -583,6 +632,8 @@ class SimulationEngine:
                 spoke=not turn.skipped,
                 speech=turn.speech if not turn.skipped else f"跳过：{turn.error_message[:120]}",
                 decision_summary=turn.response_summary if not turn.skipped else "",
+                action_type=turn.action_type if not turn.skipped else "",
+                reaction_to=turn.reaction_to if not turn.skipped else "",
             )
 
         return WorldState(
@@ -626,16 +677,11 @@ class SimulationEngine:
         if turn.decision_shift in VALID_DECISION_SHIFTS and turn.decision_shift != "none":
             agent.decision_stance = turn.decision_shift.replace("toward_", "")
 
-    def _select_active_agents(self, agents: list[Agent], cycle: int, strategy: dict[str, Any]) -> list[Agent]:
-        """根据活跃周期和方案过滤选择本轮参与的行为体。"""
-        release_cycles = self._strategy_release_cycles(strategy)
-        if release_cycles is not None and cycle not in release_cycles:
-            return []
-        actor_filters = self._strategy_actor_filters(strategy)
+    def _select_active_agents(self, agents: list[Agent], cycle: int) -> list[Agent]:
+        """根据活跃周期与激活概率选择本轮参与的行为体。"""
         candidates = [
             agent for agent in agents
-            if (not actor_filters or self._agent_matches_strategy_actor(agent, actor_filters))
-            and cycle in set(agent.active_cycles or range(1, 13))
+            if cycle in set(agent.active_cycles or range(1, 13))
         ]
         active: list[Agent] = []
         for agent in candidates:
@@ -646,25 +692,59 @@ class SimulationEngine:
             active = [max(candidates, key=lambda a: a.influence)]
         return active
 
-    def _propagate_memory(self, agents: list[Agent], turns: list[AgentTurn]) -> None:
-        """传播高影响力行为的记忆。"""
-        influential = [
-            turn
-            for turn in turns
-            if (
-                not turn.skipped
-                and turn.response_summary
-                and self._agent_by_id(agents, turn.agent_id).influence >= 1.5
-            )
-        ]
-        for agent in agents:
-            for turn in influential:
-                if turn.agent_id == agent.id:
-                    continue
-                source = turn.agent_name
-                influence = self._agent_by_id(agents, turn.agent_id).influence
-                agent.memory.append(f"{source}｜影响力 {influence:.1f}: {turn.response_summary[:90]}")
-            agent.memory = agent.memory[-5:]
+    def _build_observation(self, agent: Agent, agents: list[Agent], feed: ActionFeed, state: WorldState) -> str:
+        """构建行为体的个性化观察：供应链邻居行动 + 全链高影响力行动。"""
+        node_states = state.node_states or self._initial_node_states()
+        type_downstream = self._type_level_links(node_states)
+        relations = self._neighbor_relations(agent, agents, type_downstream)
+        records = feed.for_agent(agent.id, set(relations))
+        if not records:
+            return "暂无可观察行动（首轮或近期其他行为体未行动）"
+        return "\n".join(
+            record.format_entry(relation=relations.get(record.agent_id, "全链广播"))
+            for record in records
+        )
+
+    def _type_level_links(self, node_states: list[NodeState]) -> dict[str, set[str]]:
+        """节点类型级的下游关系：{上游类型: {下游类型}}。无节点链路时用兜底主链。"""
+        by_name = {node.name: node for node in node_states}
+        type_links: dict[str, set[str]] = {}
+        for upstream_name, downstream_names in self._node_links(node_states).items():
+            upstream = by_name.get(upstream_name)
+            if upstream is None:
+                continue
+            for name in downstream_names:
+                downstream = by_name.get(name)
+                if downstream is not None:
+                    type_links.setdefault(upstream.node_type, set()).add(downstream.node_type)
+        if type_links:
+            return type_links
+        return {
+            upstream: {downstream}
+            for upstream, downstream in zip(_FALLBACK_TYPE_CHAIN, _FALLBACK_TYPE_CHAIN[1:])
+        }
+
+    def _neighbor_relations(self, agent: Agent, agents: list[Agent], type_downstream: dict[str, set[str]]) -> dict[int, str]:
+        """其他行为体相对本行为体的链路方位：{agent_id: "上游"|"下游"}。"""
+        my_types = self._agent_node_types(agent)
+        downstream_types: set[str] = set()
+        for node_type in my_types:
+            downstream_types.update(type_downstream.get(node_type, set()))
+        upstream_types = {
+            node_type
+            for node_type, targets in type_downstream.items()
+            if not my_types.isdisjoint(targets)
+        }
+        relations: dict[int, str] = {}
+        for other in agents:
+            if other.id == agent.id:
+                continue
+            other_types = self._agent_node_types(other)
+            if not other_types.isdisjoint(upstream_types):
+                relations[other.id] = "上游"
+            elif not other_types.isdisjoint(downstream_types):
+                relations[other.id] = "下游"
+        return relations
 
     def _apply_bullwhip_effect(self, agents: list[Agent]) -> None:
         """牛鞭效应：上游行为体的波动被逐级放大。"""
@@ -682,15 +762,15 @@ class SimulationEngine:
                 agent.pressure = clamp(agent.pressure + avg_downstream_pressure * 0.15, 0.0, 1.0)
                 agent.capacity = clamp(agent.capacity - 0.03, 0.3, 1.5)
 
-    def _persist_round(self, strategy_index: int, state: WorldState, messages: list[dict[str, Any]]) -> None:
+    def _persist_round(self, state: WorldState, messages: list[dict[str, Any]]) -> None:
         repo = self.state.round_repository
         project_id = self.state.project_id
-        strategy_id = self._strategy_record_id(strategy_index)
-        if not repo or project_id is None or strategy_id is None:
+        simulation_id = self._simulation_record_id()
+        if not repo or project_id is None or simulation_id is None:
             return
         repo.save(
             project_id=project_id,
-            strategy_id=strategy_id,
+            simulation_id=simulation_id,
             round_index=state.round,
             simulated_hour=state.simulated_hour,
             inventory_level=state.inventory_level,
@@ -703,23 +783,15 @@ class SimulationEngine:
             agent_messages=messages,
         )
 
-    def _emit_callbacks(
-        self,
-        strategy_index: int,
-        strategy: dict[str, Any],
-        state: WorldState,
-        messages: list[dict[str, Any]],
-    ) -> None:
+    def _emit_callbacks(self, state: WorldState, messages: list[dict[str, Any]]) -> None:
         if self._progress_callback:
-            total = self.state.total_rounds
-            current = strategy_index * self.state.config.max_rounds + state.round
             self._progress_callback(
-                current,
-                total,
-                f"方案 {strategy_index + 1} · 第 {state.round}/{self.state.config.max_rounds} 轮",
+                state.round,
+                self.state.total_rounds,
+                f"第 {state.round}/{self.state.config.max_rounds} 轮",
             )
         if self._round_callback:
-            self._round_callback(strategy_index, strategy, state, messages)
+            self._round_callback(state, messages)
 
     def _clone_agents(self) -> list[Agent]:
         return [Agent.from_dict(agent.to_dict()) for agent in self.state.agents]
@@ -739,18 +811,12 @@ class SimulationEngine:
     def _agent_by_id(agents: list[Agent], agent_id: int) -> Agent:
         return next(agent for agent in agents if agent.id == agent_id)
 
-    def _strategy_record_id(self, strategy_index: int) -> int | None:
-        if strategy_index >= len(self.state.strategy_records):
+    def _simulation_record_id(self) -> int | None:
+        record = self.state.simulation_record
+        if record is None:
             return None
-        record = self.state.strategy_records[strategy_index]
         value = getattr(record, "id", record.get("id") if isinstance(record, dict) else None)
         return int(value) if value else None
-
-    @staticmethod
-    def _strategy_value(strategy: Any, key: str, default: Any = None) -> Any:
-        if isinstance(strategy, dict):
-            return strategy.get(key, default)
-        return getattr(strategy, key, default)
 
     @staticmethod
     def _format_recent_events(state: WorldState) -> str:
@@ -758,7 +824,7 @@ class SimulationEngine:
             return "none"
         return "\n".join(f"- {event.description}" for event in state.key_events[-3:])
 
-    def _retrieve_knowledge_context(self, agent: Agent, state: WorldState, strategy: dict[str, Any]) -> str:
+    def _retrieve_knowledge_context(self, agent: Agent, state: WorldState) -> str:
         repo = self.state.knowledge_repository
         if not repo or self.state.project_id is None:
             return "none"
@@ -768,10 +834,6 @@ class SimulationEngine:
                 scenario.title,
                 scenario.industry,
                 scenario.background[:800],
-                self._strategy_value(strategy, "name", ""),
-                self._strategy_value(strategy, "actor", ""),
-                self._strategy_value(strategy, "decision", "")[:800],
-                self._strategy_value(strategy, "release_cycle", ""),
                 agent.name,
                 agent.role,
                 self._format_current_metrics(state),
@@ -916,7 +978,6 @@ class SimulationEngine:
             "price_war": {"retailer", "distributor", "consumer"},
             "regulatory_intervention": {"supplier", "manufacturer", "distributor", "retailer", "logistics"},
             "demand_surge": {"consumer", "retailer", "distributor", "manufacturer"},
-            "natural_recovery": set(),
         }
         for event in events:
             target_types = targets_by_event.get(getattr(event, "event_type", ""), set())
@@ -1073,50 +1134,6 @@ class SimulationEngine:
                     f"cost_index={node.get('cost_index', 50)}]"
                 )
         return "\n".join(lines)
-
-    def _strategy_release_cycles(self, strategy: dict[str, Any]) -> set[int] | None:
-        raw = str(self._strategy_value(strategy, "release_cycle", "") or "").strip()
-        if not raw:
-            return None
-        values: set[int] = set()
-        parts = [part for part in re.split(r"[\s,，、;/；|]+", raw) if part]
-        for part in parts:
-            match = re.fullmatch(r"(\d+)\s*[-~]\s*(\d+)", part)
-            if match:
-                start = int(match.group(1))
-                end = int(match.group(2))
-                if start > end:
-                    start, end = end, start
-                values.update(range(start, end + 1))
-                continue
-            if part.isdigit():
-                values.add(int(part))
-        max_rounds = self.state.config.max_rounds or app_config.sim.max_rounds
-        filtered = {cycle for cycle in values if 1 <= cycle <= max_rounds}
-        return filtered if values else None
-
-    def _strategy_actor_filters(self, strategy: dict[str, Any]) -> set[str]:
-        raw = str(self._strategy_value(strategy, "actor", "") or "").strip()
-        if not raw or raw in {"全部"}:
-            return set()
-        lowered = raw.lower()
-        if lowered in {"all", "any", "*"}:
-            return set()
-        return {
-            part.strip().lower()
-            for part in re.split(r"[,，、;/；|]+", raw)
-            if part.strip()
-        }
-
-    def _agent_matches_strategy_actor(self, agent: Agent, actor_filters: set[str]) -> bool:
-        if not actor_filters:
-            return True
-        candidates = {
-            agent.name.strip().lower(),
-            agent.role.strip().lower(),
-            *self._agent_node_types(agent),
-        }
-        return not actor_filters.isdisjoint(candidates)
 
 
 def _weighted_average(values: list[tuple[float, float]], fallback: float) -> float:

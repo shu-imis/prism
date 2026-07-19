@@ -16,6 +16,8 @@ class AgentSnapshot:
     spoke: bool = False             # 本轮是否激活
     speech: str = ""                # 响应/发言内容
     decision_summary: str = ""      # 本轮决策摘要
+    action_type: str = ""           # 本轮行动类型（受限行动空间）
+    reaction_to: str = ""           # 回应对象行为体名
 
 
 @dataclass
@@ -93,6 +95,8 @@ class WorldState:
                     "spoke": s.spoke,
                     "speech": s.speech,
                     "decision_summary": s.decision_summary,
+                    "action_type": s.action_type,
+                    "reaction_to": s.reaction_to,
                 }
                 for aid, s in self.agent_states.items()
             },
@@ -147,6 +151,8 @@ class WorldState:
                 spoke=s.get("spoke", False),
                 speech=s.get("speech", ""),
                 decision_summary=s.get("decision_summary", ""),
+                action_type=s.get("action_type", ""),
+                reaction_to=s.get("reaction_to", ""),
             )
             for aid, s in data.get("agent_states", {}).items()
         }

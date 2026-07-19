@@ -15,7 +15,6 @@ class EventType(str, Enum):
     PRICE_WAR = "price_war"                                # 价格战触发
     REGULATORY_INTERVENTION = "regulatory_intervention"    # 监管介入
     DEMAND_SURGE = "demand_surge"                          # 需求激增
-    NATURAL_RECOVERY = "natural_recovery"                  # 自然恢复
 
 
 # 事件模板
@@ -60,14 +59,6 @@ EVENT_TEMPLATES: dict[EventType, dict] = {
         "service_delta": -0.08,
         "margin_delta": 0.05,
     },
-    EventType.NATURAL_RECOVERY: {
-        "description": "自然恢复",
-        "inventory_delta": 3.0,
-        "cost_delta": -2.0,
-        "delay_delta": -0.5,
-        "service_delta": 0.02,
-        "margin_delta": 0.02,
-    },
 }
 
 
@@ -75,7 +66,6 @@ class EventDetector:
     """关键事件检测器"""
 
     def __init__(self):
-        self._consecutive_quiet = 0          # 连续无事件轮次计数
         self._supplier_delay_count = 0       # 供应商连续延迟计数
         self._regulator_risk_count = 0       # 监管机构连续标记风险计数
 
@@ -119,15 +109,6 @@ class EventDetector:
         # 5. 需求激增（由调用方判断，传入标志）
         if demand_surge_detected:
             events.append(self._make_event(state, EventType.DEMAND_SURGE))
-
-        # 6. 自然恢复
-        if len(events) == 0:
-            self._consecutive_quiet += 1
-            if state.inventory_level > 0 and self._consecutive_quiet >= 3:
-                events.append(self._make_event(state, EventType.NATURAL_RECOVERY))
-                self._consecutive_quiet = 0
-        else:
-            self._consecutive_quiet = 0
 
         return events
 

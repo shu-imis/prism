@@ -24,14 +24,12 @@ class Agent:
     capacity: float = 1.0                  # 产能利用率（0~1）
     active_cycles: list[int] = field(default_factory=list)  # 活跃周期
     profile: str = ""                      # 角色画像（System Prompt）
-    memory: list[str] = field(default_factory=list)         # 最近 N 轮记忆摘要
 
     def reset(self):
         """复位到初始倾向和状态"""
         self.decision_stance = self.base_stance
         self.pressure = 0.0
         self.capacity = 1.0
-        self.memory.clear()
 
     def to_dict(self) -> dict:
         return {
@@ -46,7 +44,6 @@ class Agent:
             "capacity": self.capacity,
             "active_cycles": self.active_cycles,
             "profile": self.profile,
-            "memory": self.memory,
         }
 
     @classmethod
@@ -63,7 +60,6 @@ class Agent:
             capacity=data.get("capacity", 1.0),
             active_cycles=data.get("active_cycles", []),
             profile=data["profile"],
-            memory=data.get("memory", []),
         )
 
 
