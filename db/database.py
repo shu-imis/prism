@@ -60,6 +60,7 @@ class Database:
     def migrate(self) -> None:
         """执行当前版本所需的完整 Schema 迁移。"""
 
+        self._reset_if_legacy_schema()
         with self.transaction() as conn:
             conn.executescript(
                 """
@@ -68,29 +69,23 @@ class Database:
                     name TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'draft',
                     scenario_json TEXT NOT NULL DEFAULT '{}',
-                    strategies_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                     deleted_at TEXT
                 );
 
-                CREATE TABLE IF NOT EXISTS strategies (
+                CREATE TABLE IF NOT EXISTS simulations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     project_id INTEGER NOT NULL,
-                    name TEXT NOT NULL,
-                    actor TEXT NOT NULL DEFAULT '',
-                    decision TEXT NOT NULL DEFAULT '',
-                    release_cycle TEXT NOT NULL DEFAULT '',
-                    parameters_json TEXT NOT NULL DEFAULT '{}',
+                    name TEXT NOT NULL DEFAULT '主仿真',
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE IF NOT EXISTS simulation_rounds (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     project_id INTEGER NOT NULL,
-                    strategy_id INTEGER NOT NULL,
+                    simulation_id INTEGER NOT NULL,
                     round_index INTEGER NOT NULL,
                     simulated_hour INTEGER NOT NULL,
                     inventory_level REAL NOT NULL DEFAULT 0,
@@ -101,9 +96,9 @@ class Database:
                     resilience_score REAL NOT NULL DEFAULT 0,
                     state_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                    UNIQUE(strategy_id, round_index),
+                    UNIQUE(simulation_id, round_index),
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                    FOREIGN KEY (strategy_id) REFERENCES strategies(id) ON DELETE CASCADE
+                    FOREIGN KEY (simulation_id) REFERENCES simulations(id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE IF NOT EXISTS agent_messages (
@@ -120,12 +115,12 @@ class Database:
                 CREATE TABLE IF NOT EXISTS checkpoints (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     project_id INTEGER NOT NULL,
-                    strategy_id INTEGER NOT NULL,
+                    simulation_id INTEGER NOT NULL,
                     last_round INTEGER NOT NULL,
                     engine_state_json TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                    FOREIGN KEY (strategy_id) REFERENCES strategies(id) ON DELETE CASCADE
+                    FOREIGN KEY (simulation_id) REFERENCES simulations(id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE IF NOT EXISTS reports (
@@ -133,7 +128,6 @@ class Database:
                     project_id INTEGER NOT NULL,
                     title TEXT NOT NULL,
                     markdown TEXT NOT NULL,
-                    html TEXT NOT NULL,
                     summary_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -149,10 +143,10 @@ class Database:
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_strategies_project_id
-                    ON strategies(project_id);
-                CREATE INDEX IF NOT EXISTS idx_rounds_strategy_id
-                    ON simulation_rounds(strategy_id, round_index);
+                CREATE INDEX IF NOT EXISTS idx_simulations_project_id
+                    ON simulations(project_id);
+                CREATE INDEX IF NOT EXISTS idx_rounds_simulation_id
+                    ON simulation_rounds(simulation_id, round_index);
                 CREATE INDEX IF NOT EXISTS idx_messages_round_id
                     ON agent_messages(round_id);
                 CREATE INDEX IF NOT EXISTS idx_reports_project_id
@@ -161,6 +155,33 @@ class Database:
                     ON knowledge_chunks(project_id);
                 """
             )
+
+    def _reset_if_legacy_schema(self) -> None:
+        """检测旧版本 schema 的库文件：备份后重建（内部测试阶段，不做表级迁移）。
+
+        判定特征：projects 含 strategies_json 列、simulation_rounds 含
+        strategy_id 列、或 reports 含 html 列（均为 v0.1 schema 痕迹）。
+        """
+        try:
+            proj_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(projects)")}
+            round_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(simulation_rounds)")}
+            report_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(reports)")}
+        except Exception:
+            return
+        legacy = (
+            "strategies_json" in proj_cols
+            or "strategy_id" in round_cols
+            or "html" in report_cols
+        )
+        if not legacy:
+            return
+        self.close()
+        backup = self.db_path.with_name(self.db_path.name + ".legacy.bak")
+        for suffix in ("", "-shm", "-wal"):
+            src = Path(str(self.db_path) + suffix)
+            if src.exists():
+                src.replace(Path(str(backup) + suffix))
+        print(f"[Prism] 检测到旧版本数据库，已备份为 {backup.name} 并重建")
 
     def close(self) -> None:
         if self._conn:

@@ -22,6 +22,10 @@ def from_json(text: str | None, default: Any) -> Any:
     return json.loads(text)
 
 
+# 单世界仿真在 simulations 表中的持久化锚点名称
+MAIN_SIMULATION_NAME = "主仿真"
+
+
 @dataclass
 class Project:
     """推演项目。"""
@@ -30,7 +34,6 @@ class Project:
     name: str = ""
     status: str = "draft"
     scenario_json: str = "{}"
-    strategies_json: str = "[]"
     created_at: str = ""
     updated_at: str = ""
     deleted_at: Optional[str] = None
@@ -51,27 +54,20 @@ class Project:
 
 
 @dataclass(frozen=True)
-class Strategy:
+class Simulation:
+    """项目的主仿真锚点记录。"""
+
     id: int
     project_id: int
     name: str
-    actor: str = ""                      # 涉及行为体
-    decision: str = ""                   # 决策内容
-    release_cycle: str = ""              # 生效周期（如 "1-4"）
-    parameters_json: str = "{}"          # 决策参数 JSON
     created_at: str = ""
-    updated_at: str = ""
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return from_json(self.parameters_json, {})
 
 
 @dataclass(frozen=True)
 class SimulationRound:
     id: int
     project_id: int
-    strategy_id: int
+    simulation_id: int
     round_index: int
     simulated_hour: int
     inventory_level: float = 0.0         # 全链库存水平 0~100
@@ -94,7 +90,6 @@ class ReportRecord:
     project_id: int
     title: str
     markdown: str
-    html: str
     summary_json: str
     created_at: str
 
@@ -107,7 +102,7 @@ class ReportRecord:
 class Checkpoint:
     id: int
     project_id: int
-    strategy_id: int
+    simulation_id: int
     last_round: int
     engine_state_json: str
     created_at: str = ""
@@ -176,7 +171,7 @@ class ProjectRepository:
             conn.execute(
                 """
                 UPDATE projects
-                SET name = ?, status = ?, scenario_json = ?, strategies_json = ?,
+                SET name = ?, status = ?, scenario_json = ?,
                     updated_at = datetime('now')
                 WHERE id = ?
                 """,
@@ -184,7 +179,6 @@ class ProjectRepository:
                     project.name,
                     project.status,
                     project.scenario_json,
-                    project.strategies_json,
                     project.id,
                 ),
             )
@@ -216,87 +210,42 @@ class ProjectRepository:
         return project
 
 
-class StrategyRepository:
-    """方案数据访问。"""
+class SimulationRepository:
+    """主仿真锚点记录的数据访问。"""
 
     def __init__(self, db: Database | None = None):
         self.db = db or Database()
 
-    def create(
-        self,
-        project_id: int,
-        name: str,
-        actor: str = "",
-        decision: str = "",
-        release_cycle: str = "",
-        parameters: dict[str, Any] | None = None,
-    ) -> Strategy:
+    def create(self, project_id: int, name: str = MAIN_SIMULATION_NAME) -> Simulation:
         with self.db.transaction() as conn:
             cursor = conn.execute(
-                """
-                INSERT INTO strategies
-                    (project_id, name, actor, decision, release_cycle, parameters_json, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-                """,
-                (project_id, name, actor, decision, release_cycle, to_json(parameters or {})),
+                "INSERT INTO simulations (project_id, name) VALUES (?, ?)",
+                (project_id, name),
             )
         return self.get_by_id(int(cursor.lastrowid))
 
-    def get_by_id(self, strategy_id: int) -> Strategy:
+    def get_by_id(self, simulation_id: int) -> Simulation:
         row = self.db.conn.execute(
-            "SELECT * FROM strategies WHERE id = ?",
-            (strategy_id,),
+            "SELECT * FROM simulations WHERE id = ?",
+            (simulation_id,),
         ).fetchone()
         if row is None:
-            raise KeyError(f"方案不存在: {strategy_id}")
-        return Strategy(**dict(row))
+            raise KeyError(f"仿真记录不存在: {simulation_id}")
+        return Simulation(**dict(row))
 
-    def list_by_project(self, project_id: int) -> list[Strategy]:
+    def list_by_project(self, project_id: int) -> list[Simulation]:
         rows = self.db.conn.execute(
-            "SELECT * FROM strategies WHERE project_id = ? ORDER BY id ASC",
+            "SELECT * FROM simulations WHERE project_id = ? ORDER BY id ASC",
             (project_id,),
         ).fetchall()
-        return [Strategy(**dict(row)) for row in rows]
+        return [Simulation(**dict(row)) for row in rows]
 
-    def replace_for_project(self, project_id: int, strategies: list[dict[str, Any]]) -> list[Strategy]:
-        # 如果方案内容未变，跳过删除以避免 CASCADE 清空仿真数据
-        existing = self.list_by_project(project_id)
-        if len(existing) == len(strategies):
-            same = True
-            for old, new in zip(existing, strategies):
-                if (
-                    old.name != str(new.get("name", "")).strip()
-                    or old.actor != str(new.get("actor", "")).strip()
-                    or old.decision != str(new.get("decision", "")).strip()
-                    or old.release_cycle != str(new.get("release_cycle", ""))
-                    or old.parameters != new.get("parameters", {})
-                ):
-                    same = False
-                    break
-            if same:
-                return existing
-
-        with self.db.transaction() as conn:
-            conn.execute("DELETE FROM strategies WHERE project_id = ?", (project_id,))
-            ids: list[int] = []
-            for strategy in strategies:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO strategies
-                        (project_id, name, actor, decision, release_cycle, parameters_json, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-                    """,
-                    (
-                        project_id,
-                        str(strategy.get("name", "")).strip() or "未命名方案",
-                        str(strategy.get("actor", "")).strip(),
-                        str(strategy.get("decision", "")).strip(),
-                        str(strategy.get("release_cycle", "")),
-                        to_json(strategy.get("parameters", {})),
-                    ),
-                )
-                ids.append(int(cursor.lastrowid))
-        return [self.get_by_id(strategy_id) for strategy_id in ids]
+    def get_or_create_main(self, project_id: int) -> Simulation:
+        """返回项目的隐含主仿真记录（simulations 表仅作持久化锚点）。"""
+        for simulation in self.list_by_project(project_id):
+            if simulation.name == MAIN_SIMULATION_NAME:
+                return simulation
+        return self.create(project_id, MAIN_SIMULATION_NAME)
 
 
 class SimulationRoundRepository:
@@ -309,7 +258,7 @@ class SimulationRoundRepository:
         self,
         *,
         project_id: int,
-        strategy_id: int,
+        simulation_id: int,
         round_index: int,
         simulated_hour: int,
         inventory_level: float,
@@ -325,10 +274,10 @@ class SimulationRoundRepository:
             conn.execute(
                 """
                 INSERT INTO simulation_rounds
-                    (project_id, strategy_id, round_index, simulated_hour, inventory_level,
+                    (project_id, simulation_id, round_index, simulated_hour, inventory_level,
                      cost_index, delivery_delay, service_level, profit_margin, resilience_score, state_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(strategy_id, round_index) DO UPDATE SET
+                ON CONFLICT(simulation_id, round_index) DO UPDATE SET
                     simulated_hour = excluded.simulated_hour,
                     inventory_level = excluded.inventory_level,
                     cost_index = excluded.cost_index,
@@ -340,7 +289,7 @@ class SimulationRoundRepository:
                 """,
                 (
                     project_id,
-                    strategy_id,
+                    simulation_id,
                     round_index,
                     simulated_hour,
                     inventory_level,
@@ -352,7 +301,7 @@ class SimulationRoundRepository:
                     to_json(state),
                 ),
             )
-            round_id = self._find_round_id(strategy_id, round_index)
+            round_id = self._find_round_id(simulation_id, round_index)
             conn.execute("DELETE FROM agent_messages WHERE round_id = ?", (round_id,))
             for message in agent_messages or []:
                 conn.execute(
@@ -371,13 +320,13 @@ class SimulationRoundRepository:
                 )
         return self.get_by_id(round_id)
 
-    def _find_round_id(self, strategy_id: int, round_index: int) -> int:
+    def _find_round_id(self, simulation_id: int, round_index: int) -> int:
         row = self.db.conn.execute(
             """
             SELECT id FROM simulation_rounds
-            WHERE strategy_id = ? AND round_index = ?
+            WHERE simulation_id = ? AND round_index = ?
             """,
-            (strategy_id, round_index),
+            (simulation_id, round_index),
         ).fetchone()
         if row is None:
             raise KeyError("仿真轮次保存失败。")
@@ -392,14 +341,14 @@ class SimulationRoundRepository:
             raise KeyError(f"仿真轮次不存在: {round_id}")
         return SimulationRound(**dict(row))
 
-    def list_by_strategy(self, strategy_id: int) -> list[SimulationRound]:
+    def list_by_simulation(self, simulation_id: int) -> list[SimulationRound]:
         rows = self.db.conn.execute(
             """
             SELECT * FROM simulation_rounds
-            WHERE strategy_id = ?
+            WHERE simulation_id = ?
             ORDER BY round_index ASC
             """,
-            (strategy_id,),
+            (simulation_id,),
         ).fetchall()
         return [SimulationRound(**dict(row)) for row in rows]
 
@@ -416,16 +365,15 @@ class ReportRepository:
         project_id: int,
         title: str,
         markdown: str,
-        html: str,
         summary: dict[str, Any],
     ) -> int:
         with self.db.transaction() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO reports (project_id, title, markdown, html, summary_json)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO reports (project_id, title, markdown, summary_json)
+                VALUES (?, ?, ?, ?)
                 """,
-                (project_id, title, markdown, html, to_json(summary)),
+                (project_id, title, markdown, to_json(summary)),
             )
         return int(cursor.lastrowid)
 
@@ -451,7 +399,7 @@ class CheckpointRepository:
         self,
         *,
         project_id: int,
-        strategy_id: int,
+        simulation_id: int,
         last_round: int,
         engine_state: dict[str, Any],
     ) -> int:
@@ -459,17 +407,17 @@ class CheckpointRepository:
             conn.execute(
                 """
                 DELETE FROM checkpoints
-                WHERE project_id = ? AND strategy_id = ?
+                WHERE project_id = ? AND simulation_id = ?
                 """,
-                (project_id, strategy_id),
+                (project_id, simulation_id),
             )
             cursor = conn.execute(
                 """
                 INSERT INTO checkpoints
-                    (project_id, strategy_id, last_round, engine_state_json)
+                    (project_id, simulation_id, last_round, engine_state_json)
                 VALUES (?, ?, ?, ?)
                 """,
-                (project_id, strategy_id, last_round, to_json(engine_state)),
+                (project_id, simulation_id, last_round, to_json(engine_state)),
             )
         return int(cursor.lastrowid)
 

@@ -43,12 +43,7 @@ DB_PATH = _default_db_path()
 class SimulationDefaults:
     """仿真引擎默认参数"""
     max_rounds: int = 12
-    hours_per_round: int = 1      # 每轮 = 1 个供应链周期
-    agent_count: int = 7
-    min_strategies: int = 2
-    max_strategies: int = 4
     round_timeout: int = 120     # 单轮最大耗时（秒）
-    checkpoint_interval: int = 1  # 每 N 轮保存检查点
 
 
 @dataclass
@@ -71,8 +66,6 @@ class AppConfig:
         """从环境变量加载配置（.env 兜底）"""
         sim = SimulationDefaults(
             max_rounds=int(os.getenv("SIM_MAX_ROUNDS", "12")),
-            hours_per_round=int(os.getenv("SIM_HOURS_PER_ROUND", "1")),
-            agent_count=int(os.getenv("SIM_AGENT_COUNT", "7")),
         )
         llm = LLMDefaults(
             default_model=os.getenv("LLM_DEFAULT_MODEL", "gpt-5.6-sol"),

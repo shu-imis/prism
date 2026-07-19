@@ -3,6 +3,8 @@
 
 # 数据库
 *.db
+*.db-shm
+*.db-wal
 
 # 构建产物
 dist/
