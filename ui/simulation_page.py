@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import app_config, DB_PATH
+from config import app_config, DB_PATH, ROOT_DIR
 from core.agent_factory import AgentFactory
 from core.scenario_parser import Scenario
 from core.simulation_engine import SimulationEngine, SimulationRecoverableError
@@ -51,6 +51,18 @@ PRESETS = [
     {"label": "阶跃星辰", "proto": "openai", "url": "https://api.stepfun.com/step_plan/v1", "model": "step-3.7-flash"},
     {"label": "自定义", "proto": "openai", "url": "", "model": ""},
 ]
+
+# 厂商索引 → .env 环境变量前缀
+VENDOR_ENV_PREFIX = {
+    0: "OPENAI",
+    1: "ANTHROPIC",
+    2: "DEEPSEEK",
+    3: "QWEN",
+    4: "KIMI",
+    5: "ZHIPU",
+    6: "STEPFUN",
+    7: "CUSTOM",
+}
 
 
 class SimWorker(QThread):
@@ -189,6 +201,7 @@ class SimulationPage(QWidget):
         self._pid = None
         self._running = False
         self._worker = None
+        self._vendor_state: dict[int, dict[str, str]] = {}
         self._build()
 
     def _build(self):
@@ -292,11 +305,71 @@ class SimulationPage(QWidget):
         scroll.setWidget(inner)
         layout.addWidget(scroll)
 
+        # 从 .env 预填各厂商配置
+        self._load_vendor_state_from_env()
+
+    def _load_vendor_state_from_env(self):
+        """从 .env 加载各厂商已保存的配置，并预填当前选中厂商。"""
+        for idx, prefix in VENDOR_ENV_PREFIX.items():
+            key = os.getenv(f"{prefix}_API_KEY", "")
+            url = os.getenv(f"{prefix}_BASE_URL", "")
+            model = os.getenv(f"{prefix}_MODEL", "")
+            preset = PRESETS[idx]
+            if key or url or model:
+                self._vendor_state[idx] = {
+                    "key": key,
+                    "url": url or preset.get("url", ""),
+                    "model": model or preset.get("model", ""),
+                }
+        # 预填默认厂商（OpenAI，index 0）
+        self._apply_vendor_state(0)
+
+    def _apply_vendor_state(self, index: int):
+        """将指定厂商的状态填入 UI 控件。"""
+        if index in self._vendor_state:
+            state = self._vendor_state[index]
+            self._key.setText(state.get("key", ""))
+            self._url.setText(state.get("url", ""))
+            self._model.setText(state.get("model", ""))
+        else:
+            p = PRESETS[index]
+            self._key.setText("")
+            self._url.setText(p.get("url", ""))
+            self._model.setText(p.get("model", ""))
+
+    def _save_current_vendor_state(self):
+        """将当前 UI 输入保存到当前厂商的状态中。"""
+        self._vendor_state[self._provider_index] = {
+            "key": self._key.text(),
+            "url": self._url.text(),
+            "model": self._model.text(),
+        }
+
+    def _persist_to_env(self):
+        """将所有厂商状态写入 .env 文件持久化。"""
+        self._save_current_vendor_state()
+        env_path = ROOT_DIR / ".env"
+        try:
+            from dotenv import set_key as dotenv_set_key
+        except ImportError:
+            return
+        env_path_str = str(env_path)
+        for idx, state in self._vendor_state.items():
+            if idx not in VENDOR_ENV_PREFIX:
+                continue
+            prefix = VENDOR_ENV_PREFIX[idx]
+            for field, suffix in [("key", "API_KEY"), ("url", "BASE_URL"), ("model", "MODEL")]:
+                try:
+                    dotenv_set_key(env_path_str, f"{prefix}_{suffix}", state.get(field, ""))
+                except Exception:
+                    pass
+
     def _on_provider_changed(self, index: int):
+        if index == self._provider_index:
+            return
+        self._save_current_vendor_state()
         self._provider_index = index
-        p = PRESETS[index]
-        self._url.setText(p.get("url", ""))
-        self._model.setText(p.get("model", ""))
+        self._apply_vendor_state(index)
 
     def _toggle_config(self):
         cv = self._config_widget
@@ -371,6 +444,9 @@ class SimulationPage(QWidget):
         # 替换旧 worker 前必须等其线程真正结束，否则对运行中的 QThread
         # 调用 disconnect/deleteLater 会触发 use-after-free 崩溃。
         self._dispose_worker()
+
+        # 持久化当前厂商及所有厂商配置到 .env
+        self._persist_to_env()
 
         p = PRESETS[self._provider_index]
         self._worker = SimWorker(
