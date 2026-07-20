@@ -44,6 +44,7 @@ class HomePage(QWidget):
         self._grid = QGridLayout(self._inner)
         self._grid.setContentsMargins(PAD_XL, 0, PAD_XL, 0)
         self._grid.setSpacing(PAD_MD)
+        self._grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         scroll.setWidget(self._inner)
         layout.addWidget(scroll, 1)
         self.refresh()
@@ -59,9 +60,15 @@ class HomePage(QWidget):
             empty = QLabel("暂无项目\n点击「＋ 新建项目」创建")
             empty.setAlignment(Qt.AlignCenter)
             empty.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 14px; padding: 40px;")
-            self._grid.addWidget(empty, 0, 0)
+            for col in range(3):
+                self._grid.setColumnStretch(col, 1)
+            self._grid.setRowStretch(0, 1)
+            self._grid.addWidget(empty, 0, 0, 1, 3, Qt.AlignCenter)
             return
 
+        for col in range(3):
+            self._grid.setColumnStretch(col, 0)
+        self._grid.setRowStretch(0, 0)
         for i, proj in enumerate(projects):
             btn = QPushButton()
             btn.setObjectName("")
@@ -91,6 +98,10 @@ class HomePage(QWidget):
             name.setWordWrap(True)
             name.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {TEXT_PRIMARY};")
             card_layout.addWidget(name)
+
+            industry = proj.scenario.get("industry", "")
+            if industry:
+                card_layout.addWidget(Caption(industry))
 
             card_layout.addStretch()
 

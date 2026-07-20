@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QMouseEvent, QPainter, QPen, QColor
 
-from ui.styles import TEXT_PRIMARY, TEXT_MUTED
+from ui.styles import TEXT_PRIMARY, TEXT_MUTED, TEXT_ON_DARK
 
 TITLE_BAR_H = 36
 
@@ -58,9 +58,9 @@ class _WinButton(QPushButton):
             p.fillRect(self.rect(), QColor(0, 0, 0, 8))
 
         # 符号
-        pen_color = QColor("#999") if self._active else QColor("#BBB")
+        pen_color = QColor(TEXT_MUTED) if self._active else QColor("#BBB")
         if self._hover and self._kind == "close":
-            pen_color = QColor("#FFF")
+            pen_color = QColor(TEXT_ON_DARK)
         p.setPen(QPen(pen_color, 1.2))
 
         cx, cy = w // 2, h // 2

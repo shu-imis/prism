@@ -300,7 +300,7 @@ class EventPage(QWidget):
         inner_layout.addWidget(param_card)
         inner_layout.addStretch()
 
-        self._save_btn = PrimaryBtn("保存并配置决策方案 →")
+        self._save_btn = PrimaryBtn("保存并配置行为体性格 →")
         self._save_btn.clicked.connect(self._save)
         inner_layout.addWidget(self._save_btn)
 

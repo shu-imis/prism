@@ -10,12 +10,19 @@ from PySide6.QtWidgets import (
 )
 
 from ui.event_page import EventPage
+from ui.persona_page import PersonaPage
 from ui.result_page import ResultPage
 from ui.simulation_page import SimulationPage
-from ui.strategy_page import StrategyPage
 from ui.styles import *
 from ui.widgets import Divider, PrimaryBtn, SecondaryBtn
-from db.models import ReportRepository, SimulationRoundRepository, StrategyRepository
+from db.models import (
+    MAIN_SIMULATION_NAME,
+    CheckpointRepository,
+    ProjectRepository,
+    ReportRepository,
+    SimulationRepository,
+    SimulationRoundRepository,
+)
 from report.exporter import ReportExporter
 
 
@@ -25,6 +32,7 @@ class ProcessPage(QWidget):
         self._pid = None
         self._step = 0
         self._sim_done = False
+        self._saved_steps: set[int] = set()
         self._build()
         self._wire()
 
@@ -42,7 +50,7 @@ class ProcessPage(QWidget):
 
         self._tag = QLabel("STEP 01")
         self._tag.setStyleSheet(
-            f"background:{ACCENT};color:#FFF;padding:2px 8px;"
+            f"background:{ACCENT};color:{TEXT_ON_DARK};padding:2px 8px;"
             "font-family:'JetBrains Mono';font-size:10px;font-weight:700;"
         )
         bl.addWidget(self._tag)
@@ -56,7 +64,7 @@ class ProcessPage(QWidget):
         bl.addStretch()
 
         self._dot = QLabel("●")
-        self._dot.setStyleSheet("color:#CCC;font-size:10px;")
+        self._dot.setStyleSheet(f"color:{BORDER};font-size:10px;")
         bl.addWidget(self._dot)
         bl.addSpacing(PAD_SM)
 
@@ -73,7 +81,7 @@ class ProcessPage(QWidget):
 
         self._stack = QStackedWidget()
         self._ep = EventPage()
-        self._sp = StrategyPage()
+        self._sp = PersonaPage()
         self._smp = SimulationPage()
         self._rp = ResultPage()
         for p in [self._ep, self._sp, self._smp, self._rp]:
@@ -108,7 +116,7 @@ class ProcessPage(QWidget):
         self._log.setFrameShape(QFrame.NoFrame)
         self._log.setStyleSheet(
             "QPlainTextEdit{"
-            "background:#1A1A1A;color:#AAA;"
+            f"background:{TEXT_PRIMARY};color:#AAA;"
             "font-family:'JetBrains Mono','Noto Sans SC';font-size:11px;"
             "border:none;padding:6px 10px;"
             "}"
@@ -120,8 +128,9 @@ class ProcessPage(QWidget):
 
     def _wire(self):
         self._ep.project_saved.connect(self._on_saved)
-        self._sp.strategies_saved.connect(self._on_saved)
+        self._sp.agents_saved.connect(self._on_saved)
         self._smp.simulation_completed.connect(self._on_done)
+        self._smp.state_changed.connect(self._update)
         # 将终端日志接口传给各页面
         self._ep.log = self._log_msg
         self._sp.log = self._log_msg
@@ -133,6 +142,7 @@ class ProcessPage(QWidget):
 
     def _on_saved(self, pid):
         self._pid = pid
+        self._saved_steps.add(self._step)
         self._p(f"项目已保存（#{pid}）")
         self._advance()
 
@@ -141,40 +151,19 @@ class ProcessPage(QWidget):
         self._sim_done = True
         self._update()
         self._rp.set_report(r, res)
-        # 持久化（主线程）
+        # 持久化报告（主线程）；仿真轮次已由引擎自行落库
         if self._pid:
             try:
-                strategies = StrategyRepository().list_by_project(self._pid)
-                round_repo = SimulationRoundRepository()
-                for si, states in enumerate(res):
-                    if si >= len(strategies):
-                        break
-                    for ws in states:
-                        if ws.round == 0:
-                            continue
-                        round_repo.save(
-                            project_id=self._pid,
-                            strategy_id=strategies[si].id,
-                            round_index=ws.round,
-                            simulated_hour=ws.simulated_hour,
-                            inventory_level=ws.inventory_level,
-                            cost_index=ws.cost_index,
-                            delivery_delay=ws.delivery_delay,
-                            service_level=ws.service_level,
-                            profit_margin=ws.profit_margin,
-                            resilience_score=ws.resilience_score,
-                            state=ws.to_dict(),
-                            agent_messages=[],
-                        )
-                self._p("仿真数据已保存")
-
-                md = ReportExporter.to_markdown(r)
-                html = ReportExporter.export_html(r)
+                project = ProjectRepository().get_by_id(self._pid)
+                if project:
+                    ProjectRepository().update_scenario(
+                        self._pid, dict(project.scenario), status="completed"
+                    )
+                md = ReportExporter.to_markdown(r, res)
                 ReportRepository().save(
                     project_id=self._pid,
-                    title=f"{r.project_name} - 供应链决策推演报告",
+                    title=f"{r.project_name} - 供应链演化仿真报告",
                     markdown=md,
-                    html=html,
                     summary=r.to_dict(),
                 )
             except Exception as e:
@@ -218,7 +207,7 @@ class ProcessPage(QWidget):
 
     def _update(self):
         nums = ["01", "02", "03", "04"]
-        names = ["供应链搭建", "行为体决策配置", "供应链仿真", "决策结果分析"]
+        names = ["供应链搭建", "行为体性格配置", "供应链仿真", "演化结果分析"]
         self._tag.setText(f"STEP {nums[self._step]}")
         self._nm.setText(names[self._step])
         self._stack.setCurrentIndex(self._step)
@@ -236,22 +225,69 @@ class ProcessPage(QWidget):
             self._next.setText("下一步 →")
             self._next.setVisible(True)
 
+        # 右上角步骤状态指示（圆点与文案同色）
+        status_text, status_color = self._step_status()
+        self._st.setText(status_text)
+        self._st.setStyleSheet(f"font-size:12px;color:{status_color};")
+        self._dot.setStyleSheet(f"color:{status_color};font-size:10px;")
+
+    def _step_status(self) -> tuple[str, str]:
+        """当前步骤的状态文案与颜色。"""
+        if self._step in (0, 1):
+            if self._step in self._saved_steps:
+                return "已保存", COLOR_GREEN
+            return "编辑中", TEXT_MUTED
+        if self._step == 2:
+            # 正在运行的仿真优先于历史完成态（重新运行时显示"仿真中"）
+            if self._smp.is_running():
+                return "仿真中…", COLOR_BLUE
+            if self._pid and CheckpointRepository().latest_for_project(self._pid):
+                return "待恢复", COLOR_ORANGE
+            if self._sim_done:
+                return "已完成", COLOR_GREEN
+            return "待启动", TEXT_MUTED
+        if self._sim_done:
+            return "已完成", COLOR_GREEN
+        return "待仿真", TEXT_MUTED
+
     def _p(self, msg):
         self._log.appendPlainText(f"  >  {msg}")
 
     def load_project(self, pid):
         self._pid = pid
         self._step = 0
+        # 先确定各步骤完成态，再刷新状态指示
+        reports = ReportRepository().list_by_project(pid)
+        project = ProjectRepository().get_by_id(pid)
+        # Step 4 的数据可从轮次重建，故完成态 = 有报告或有轮次（容忍仿真中断/报告缺失）
+        self._sim_done = bool(reports) or self._has_rounds(pid)
+        self._saved_steps = {0}
+        if project and project.scenario.get("agents_config"):
+            self._saved_steps.add(1)
+        if project and project.status == "running":
+            # 重启后不存在仍在运行的仿真，running 必为陈旧状态
+            stale = "completed" if self._sim_done else "draft"
+            ProjectRepository().update_scenario(pid, dict(project.scenario), status=stale)
         self._update()
         self._log.clear()
         self._ep.load_project(pid)
         self._p(f"项目已加载（#{pid}）")
-        # 检查是否有已完成的历史仿真
-        reports = ReportRepository().list_by_project(pid)
-        self._sim_done = bool(reports)
         if self._sim_done:
             self._smp.load_project(pid)    # 预加载 Step 3 历史
             self._rp.load_results(pid)     # 预加载 Step 4 报告
+
+    @staticmethod
+    def _has_rounds(pid) -> bool:
+        """主仿真是否存在轮次数据。"""
+        main_record = next(
+            (s for s in SimulationRepository().list_by_project(pid)
+             if s.name == MAIN_SIMULATION_NAME),
+            None,
+        )
+        return bool(
+            main_record
+            and SimulationRoundRepository().list_by_simulation(main_record.id)
+        )
 
     def stop_worker(self):
         """安全停止仿真工作线程，供主窗口关闭时调用。"""
@@ -261,6 +297,7 @@ class ProcessPage(QWidget):
         self._pid = None
         self._step = 0
         self._sim_done = False
+        self._saved_steps = set()
         self._update()
         self._log.clear()
         self._ep.reset_for_new_project()

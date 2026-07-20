@@ -6,7 +6,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QTextEdit,
@@ -16,13 +15,20 @@ from PySide6.QtWidgets import (
 
 from config import app_config, DB_PATH
 from core.agent_factory import AgentFactory
-from core.scenario_parser import ScenarioParser
+from core.scenario_parser import Scenario
 from core.simulation_engine import SimulationEngine, SimulationRecoverableError
 from db.database import Database
-from db.models import CheckpointRepository, ProjectRepository, SimulationRoundRepository, StrategyRepository
+from db.models import (
+    MAIN_SIMULATION_NAME,
+    CheckpointRepository,
+    ProjectRepository,
+    SimulationRepository,
+    SimulationRoundRepository,
+)
 from llm.client import LLMClient, LLMProvider, ProviderSettings
 from report.generator import ReportGenerator
 from ui.styles import *
+from ui.text_utils import normalize_speech
 from ui.widgets import (
     Caption,
     Card,
@@ -31,6 +37,7 @@ from ui.widgets import (
     PrimaryBtn,
     ProgressBar,
     SecondaryBtn,
+    SegmentedControl,
     Title,
 )
 
@@ -104,29 +111,27 @@ class SimWorker(QThread):
 
             llm = LLMClient(providers=[ps], max_retries=1)
             proj = ProjectRepository(db).get_by_id(self.pid)
-            sc = ScenarioParser().parse(**proj.scenario) if proj else None
-            sl = StrategyRepository(db).list_by_project(self.pid)
-            strategies = [
-                {
-                    "name": s.name,
-                    "actor": s.actor,
-                    "decision": s.decision,
-                    "release_cycle": s.release_cycle,
-                    "parameters": s.parameters,
-                }
-                for s in sl
-            ]
-            strategy_records = list(sl)
+            scenario_dict = proj.scenario if proj else {}
+            sc = Scenario.from_dict(scenario_dict)
+            sim_record = (
+                SimulationRepository(db).get_or_create_main(self.pid)
+                if self.pid
+                else None
+            )
             round_repo = SimulationRoundRepository(db)
             checkpoint_repo = CheckpointRepository(db)
 
             agents = AgentFactory.create_all()
+            AgentFactory.apply_overrides(agents, scenario_dict.get("agents_config"))
+            seed_events = scenario_dict.get("seed_events", [])
+
             engine = SimulationEngine(llm)
             engine.configure(
-                agents, sc, strategies,
+                agents, sc,
+                seed_events=seed_events,
                 max_rounds=self.rounds,
                 project_id=self.pid,
-                strategy_records=strategy_records,
+                simulation_record=sim_record,
                 round_repository=round_repo,
                 checkpoint_repository=checkpoint_repo,
                 resume_checkpoint=self._checkpoint,
@@ -135,7 +140,7 @@ class SimWorker(QThread):
                 lambda c, t, m: self.progress.emit(c, t, m)
             )
             engine.set_round_callback(
-                lambda si, strategy, state, messages: (
+                lambda state, messages: (
                     None if self._paused else self.round_done.emit({
                         "round": state.round,
                         "inventory": state.inventory_level,
@@ -155,12 +160,9 @@ class SimWorker(QThread):
                 return
             gen = ReportGenerator(
                 proj.name if proj else "",
-                sc.background if sc else "",
+                sc.background,
             )
-            for si, sr in enumerate(results):
-                nm = strategies[si]["name"] if si < len(strategies) else f"方案{si + 1}"
-                dc = strategies[si]["decision"] if si < len(strategies) else ""
-                gen.add_strategy_result(nm, dc, sr)
+            gen.add_simulation_result(results)
 
             self.succeeded.emit(gen.generate(), results)
         except SimulationRecoverableError as e:
@@ -180,6 +182,7 @@ class SimWorker(QThread):
 
 class SimulationPage(QWidget):
     simulation_completed = Signal(object, list)
+    state_changed = Signal()  # 仿真运行状态变化（启动/暂停/结束），供工作区状态指示联动
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -209,41 +212,14 @@ class SimulationPage(QWidget):
         cfg.add(Title("LLM 配置", 13))
 
         self._provider_index = 0
-        provider_row = QHBoxLayout()
-        provider_row.setSpacing(0)
-
-        self._prov_minus = QPushButton("<")
-        self._prov_minus.setFixedSize(BTN_H, BTN_H)
-        self._prov_minus.setCursor(Qt.PointingHandCursor)
-        self._prov_minus.setStyleSheet(
-            f"QPushButton{{background:{BG_SURFACE};border:1px solid {BORDER};border-right:none;font-size:13px;color:{TEXT_PRIMARY};}}"
-            f"QPushButton:hover{{background:{BG_HOVER};}}"
+        self._provider_seg = SegmentedControl(
+            [(str(i), p["label"]) for i, p in enumerate(PRESETS)]
         )
-        self._prov_minus.clicked.connect(self._prev_provider)
-
-        self._provider_label = QLabel(PRESETS[0]["label"])
-        self._provider_label.setFixedHeight(BTN_H)
-        self._provider_label.setAlignment(Qt.AlignCenter)
-        self._provider_label.setStyleSheet(
-            f"QLabel{{background:{BG_INPUT};border:1px solid {BORDER};border-left:none;border-right:none;"
-            "font-family:'Space Grotesk','Noto Sans SC';"
-            f"font-size:13px;font-weight:600;color:{TEXT_PRIMARY};}}"
+        self._provider_seg.set_value("0")
+        self._provider_seg.valueChanged.connect(
+            lambda v: self._on_provider_changed(int(v))
         )
-
-        self._prov_plus = QPushButton(">")
-        self._prov_plus.setFixedSize(BTN_H, BTN_H)
-        self._prov_plus.setCursor(Qt.PointingHandCursor)
-        self._prov_plus.setStyleSheet(
-            f"QPushButton{{background:{BG_SURFACE};border:1px solid {BORDER};border-left:none;font-size:13px;color:{TEXT_PRIMARY};}}"
-            f"QPushButton:hover{{background:{BG_HOVER};}}"
-        )
-        self._prov_plus.clicked.connect(self._next_provider)
-
-        provider_row.addWidget(self._prov_minus)
-        provider_row.addWidget(self._provider_label, 1)
-        provider_row.addWidget(self._prov_plus)
-        provider_row.addStretch()
-        cfg.add_layout(provider_row)
+        cfg.add(self._provider_seg)
 
         self._key = Input("API Key")
         self._key.setEchoMode(QLineEdit.Password)
@@ -263,9 +239,11 @@ class SimulationPage(QWidget):
         cl.addWidget(self._model)
         cfg.add(cv)
 
-        self._toggle_btn = GhostBtn("收起 ▲")
+        self._toggle_btn = GhostBtn("展开 ▼")
         self._toggle_btn.clicked.connect(self._toggle_config)
         cfg.add(self._toggle_btn)
+        # 默认收起 API Key/URL/模型字段，首屏留给指标与日志
+        self._config_widget.setVisible(False)
         il.addWidget(cfg)
 
         # --- 指标卡 ---
@@ -314,17 +292,9 @@ class SimulationPage(QWidget):
         scroll.setWidget(inner)
         layout.addWidget(scroll)
 
-    def _prev_provider(self):
-        self._provider_index = (self._provider_index - 1) % len(PRESETS)
-        self._update_provider()
-
-    def _next_provider(self):
-        self._provider_index = (self._provider_index + 1) % len(PRESETS)
-        self._update_provider()
-
-    def _update_provider(self):
-        p = PRESETS[self._provider_index]
-        self._provider_label.setText(p["label"])
+    def _on_provider_changed(self, index: int):
+        self._provider_index = index
+        p = PRESETS[index]
         self._url.setText(p.get("url", ""))
         self._model.setText(p.get("model", ""))
 
@@ -344,41 +314,50 @@ class SimulationPage(QWidget):
         self._reset()
 
     def _load_history(self):
-        """从 DB 加载历史仿真轮次数据并回显到日志和指标卡。"""
+        """从 DB 加载主仿真的历史轮次数据并回显到日志和指标卡。"""
         if not self._pid:
             return
-        strategies = StrategyRepository().list_by_project(self._pid)
-        if not strategies:
+        main_record = next(
+            (s for s in SimulationRepository().list_by_project(self._pid)
+             if s.name == MAIN_SIMULATION_NAME),
+            None,
+        )
+        if main_record is None:
             return
-        round_repo = SimulationRoundRepository()
-        has_data = False
-        last_round = None
-        for strategy in strategies:
-            rounds = round_repo.list_by_strategy(strategy.id)
-            if not rounds:
-                continue
-            has_data = True
-            self._log.append(f"  >  [方案：{strategy.name}]")
-            for r in rounds:
-                self._log.append(
-                    f"  >  [周期 {r.round_index}]  库存 {r.inventory_level:.0f}  "
-                    f"成本 {r.cost_index:.0f}  服务 {r.service_level:.0%}  "
-                    f"利润 {r.profit_margin:+.1%}"
-                )
-            if rounds:
-                last_round = rounds[-1]
-        if has_data and last_round:
-            self._mv["库存"].setText(f"{last_round.inventory_level:.1f}")
-            self._mv["成本"].setText(f"{last_round.cost_index:.1f}")
-            self._mv["服务水平"].setText(f"{last_round.service_level:.0%}")
-            self._mv["利润率"].setText(f"{last_round.profit_margin:+.1%}")
-            self._mv["交付延迟"].setText(f"{last_round.delivery_delay:.1f}")
-            self._bar.setValue(100)
-            self._st.setText("仿真已完成")
+        rounds = SimulationRoundRepository().list_by_simulation(main_record.id)
+        if not rounds:
+            return
+        for r in rounds:
+            self._log.append(
+                f"  >  [周期 {r.round_index}]  库存 {r.inventory_level:.0f}  "
+                f"成本 {r.cost_index:.0f}  服务 {r.service_level:.0%}  "
+                f"利润 {r.profit_margin:+.1%}"
+            )
+        last_round = rounds[-1]
+        self._mv["库存"].setText(f"{last_round.inventory_level:.1f}")
+        self._mv["成本"].setText(f"{last_round.cost_index:.1f}")
+        self._mv["服务水平"].setText(f"{last_round.service_level:.0%}")
+        self._mv["利润率"].setText(f"{last_round.profit_margin:+.1%}")
+        self._mv["交付延迟"].setText(f"{last_round.delivery_delay:.1f}")
+
+        # 有检查点 = 中断态：回显历史但保留恢复入口，不标记完成
+        if CheckpointRepository().latest_for_project(self._pid):
+            self._bar.setValue(
+                int(last_round.round_index / max(app_config.sim.max_rounds, 1) * 100)
+            )
+            self._st.setText("仿真中断，可从断点恢复")
             self._st.setVisible(True)
-            self._start.setText("✓ 已完成")
-            self._start.setEnabled(False)
+            self._start.setText("↺ 恢复仿真")
+            self._start.setEnabled(True)
             self._running = False
+            return
+
+        self._bar.setValue(100)
+        self._st.setText("仿真已完成")
+        self._st.setVisible(True)
+        self._start.setText("✓ 已完成")
+        self._start.setEnabled(False)
+        self._running = False
 
     def _toggle(self):
         if self._running:
@@ -386,6 +365,7 @@ class SimulationPage(QWidget):
                 self._worker.pause()
             self._running = False
             self._start.setText("▶ 继续")
+            self.state_changed.emit()
             return
 
         # 替换旧 worker 前必须等其线程真正结束，否则对运行中的 QThread
@@ -419,7 +399,15 @@ class SimulationPage(QWidget):
 
         self._running = True
         self._start.setText("⏸ 暂停")
+        if self._pid:
+            # 项目状态机：启动仿真 → running，完成 → completed（见 process_page）
+            project = ProjectRepository().get_by_id(self._pid)
+            if project and project.status != "running":
+                ProjectRepository().update_scenario(
+                    self._pid, dict(project.scenario), status="running"
+                )
         self._worker.start()
+        self.state_changed.emit()
 
     def _dispose_worker(self):
         """同步等待旧 worker 线程结束后安全清理。调用方在主线程。"""
@@ -479,18 +467,21 @@ class SimulationPage(QWidget):
         self._start.setText("✓ 完成")
         self._start.setEnabled(False)
         self.simulation_completed.emit(report, results)
+        self.state_changed.emit()
 
     def _on_failed(self, msg):
         self._running = False
         self.log(msg, is_error=True)
         self._start.setText("▶ 重试")
         self._start.setEnabled(True)
+        self.state_changed.emit()
 
     def _on_recoverable(self, msg):
         self._running = False
         self.log(msg, is_error=True)
         self._start.setText("↺ 恢复")
         self._start.setEnabled(True)
+        self.state_changed.emit()
 
     def _on_progress(self, current, total, message):
         if total:
@@ -523,11 +514,18 @@ class SimulationPage(QWidget):
             skipped = msg.get("metrics", {}).get("skipped", False)
             if skipped:
                 error = msg.get("metrics", {}).get("error_message", "")
-                self._log.append(f"    ×  {agent_name}: {error[:80]}")
+                self._log.append(f"    ×  {agent_name}：{error[:80]}")
             else:
-                content = msg.get("content", "")
+                content = normalize_speech(msg.get("content", ""))
                 if content:
-                    self._log.append(f"    ↳  {agent_name}: {content}")
+                    action_type = msg.get("action_type", "maintain")
+                    reaction_to = msg.get("reaction_to", "none")
+                    reaction = f" 回应@{reaction_to}" if reaction_to != "none" else ""
+                    self._log.append(f"    ↳  {agent_name}【{action_type}】{reaction}：{content}")
+
+    def is_running(self) -> bool:
+        """仿真是否正在运行（供工作区状态指示查询）。"""
+        return self._running
 
     def stop_worker(self):
         """安全停止工作线程，供主窗口关闭时调用。

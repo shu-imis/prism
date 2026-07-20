@@ -1,6 +1,6 @@
 """报告生成器。
 
-将仿真轮次数据转成结构化评估结果，并给出可解释的方案推荐。
+将单世界仿真轮次数据转成结构化演化评估结果。
 """
 from __future__ import annotations
 
@@ -13,14 +13,15 @@ from core import clamp
 
 
 @dataclass
-class StrategyReport:
-    """单个决策方案的评估报告。"""
+class SimulationReport:
+    """单世界仿真演化的评估报告。"""
 
-    strategy_name: str
-    strategy_decision: str
-    final_inventory: float
-    final_cost: float
-    final_delivery_delay: float
+    project_name: str
+    scenario_background: str
+    generated_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
+    final_inventory: float = 0.0
+    final_cost: float = 0.0
+    final_delivery_delay: float = 0.0
     final_service_level: float = 0.0
     final_profit_margin: float = 0.0
     inventory_delta: float = 0.0
@@ -30,14 +31,15 @@ class StrategyReport:
     margin_delta: float = 0.0
     scores: dict[str, float] = field(default_factory=dict)
     key_events: list[str] = field(default_factory=list)
-    summary: str = ""
+    evolution_summary: str = ""
     recommendation: str = ""
     risks: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "strategy_name": self.strategy_name,
-            "strategy_decision": self.strategy_decision,
+            "project_name": self.project_name,
+            "scenario_background": self.scenario_background,
+            "generated_at": self.generated_at,
             "final_inventory": self.final_inventory,
             "final_cost": self.final_cost,
             "final_delivery_delay": self.final_delivery_delay,
@@ -50,54 +52,54 @@ class StrategyReport:
             "margin_delta": self.margin_delta,
             "scores": self.scores,
             "key_events": self.key_events,
-            "summary": self.summary,
+            "evolution_summary": self.evolution_summary,
             "recommendation": self.recommendation,
             "risks": self.risks,
         }
 
-
-@dataclass
-class ProjectReport:
-    """完整项目报告。"""
-
-    project_name: str
-    scenario_background: str
-    generated_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
-    strategy_reports: list[StrategyReport] = field(default_factory=list)
-    executive_summary: str = ""
-    recommendations: list[str] = field(default_factory=list)
-    winner: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "project_name": self.project_name,
-            "scenario_background": self.scenario_background,
-            "generated_at": self.generated_at,
-            "strategy_reports": [report.to_dict() for report in self.strategy_reports],
-            "executive_summary": self.executive_summary,
-            "recommendations": self.recommendations,
-            "winner": self.winner,
-        }
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SimulationReport:
+        """从持久化的 summary dict 还原报告。"""
+        report = cls(
+            project_name=data.get("project_name", ""),
+            scenario_background=data.get("scenario_background", ""),
+            final_inventory=data.get("final_inventory", 0.0),
+            final_cost=data.get("final_cost", 0.0),
+            final_delivery_delay=data.get("final_delivery_delay", 0.0),
+            final_service_level=data.get("final_service_level", 0.0),
+            final_profit_margin=data.get("final_profit_margin", 0.0),
+            inventory_delta=data.get("inventory_delta", 0.0),
+            cost_delta=data.get("cost_delta", 0.0),
+            delay_delta=data.get("delay_delta", 0.0),
+            service_delta=data.get("service_delta", 0.0),
+            margin_delta=data.get("margin_delta", 0.0),
+            scores=dict(data.get("scores", {})),
+            key_events=list(data.get("key_events", [])),
+            evolution_summary=data.get("evolution_summary", ""),
+            recommendation=data.get("recommendation", ""),
+            risks=list(data.get("risks", [])),
+        )
+        if data.get("generated_at"):
+            report.generated_at = str(data["generated_at"])
+        return report
 
 
 class ReportGenerator:
     """报告生成器。"""
 
     def __init__(self, project_name: str = "", scenario_background: str = ""):
-        self.report = ProjectReport(
-            project_name=project_name,
-            scenario_background=scenario_background,
-        )
+        self.project_name = project_name
+        self.scenario_background = scenario_background
+        self._rounds: list[WorldState] = []
 
-    def add_strategy_result(
-        self,
-        name: str,
-        decision: str,
-        rounds: list[WorldState],
-    ) -> StrategyReport:
-        """从仿真轮次数据生成方案报告。"""
+    def add_simulation_result(self, rounds: list[WorldState]) -> None:
+        """设置单世界仿真的轮次数据。"""
+        self._rounds = list(rounds or [])
 
-        normalized = rounds or [WorldState()]
+    def generate(self) -> SimulationReport:
+        """生成单世界演化评估报告。"""
+
+        normalized = self._rounds or [WorldState()]
         first = normalized[0]
         final = normalized[-1]
         inventory_delta = final.inventory_level - first.inventory_level
@@ -110,12 +112,12 @@ class ReportGenerator:
             for round_state in normalized
             for event in round_state.key_events
         ]
-        scores = score_strategy(final, inventory_delta, cost_delta, delay_delta, service_delta, margin_delta)
+        scores = score_evolution(final, inventory_delta, cost_delta, delay_delta, service_delta, margin_delta)
         risks = detect_risks(final, inventory_delta, cost_delta, delay_delta, key_events)
 
-        strategy_report = StrategyReport(
-            strategy_name=name,
-            strategy_decision=decision,
+        return SimulationReport(
+            project_name=self.project_name,
+            scenario_background=self.scenario_background,
             final_inventory=final.inventory_level,
             final_cost=final.cost_index,
             final_delivery_delay=final.delivery_delay,
@@ -128,29 +130,15 @@ class ReportGenerator:
             margin_delta=margin_delta,
             scores=scores,
             key_events=key_events,
-            summary=build_strategy_summary(name, final, inventory_delta, cost_delta, delay_delta, service_delta, margin_delta),
+            evolution_summary=build_evolution_summary(
+                normalized, final, inventory_delta, cost_delta, service_delta, margin_delta, key_events
+            ),
             recommendation=recommend(scores, risks),
             risks=risks,
         )
-        self.report.strategy_reports.append(strategy_report)
-        return strategy_report
-
-    def generate(self) -> ProjectReport:
-        """生成最终报告。"""
-
-        self.report.winner = select_winner(self.report.strategy_reports)
-        self.report.executive_summary = build_executive_summary(
-            self.report.strategy_reports,
-            self.report.winner,
-        )
-        self.report.recommendations = [
-            f"{item.strategy_name}: {item.recommendation}"
-            for item in self.report.strategy_reports
-        ]
-        return self.report
 
 
-def score_strategy(
+def score_evolution(
     final: WorldState,
     inventory_delta: float,
     cost_delta: float,
@@ -158,7 +146,7 @@ def score_strategy(
     service_delta: float,
     margin_delta: float,
 ) -> dict[str, float]:
-    """生成六维评分，值域 0~100。"""
+    """生成六维评估，值域 0~100。"""
 
     return {
         "成本控制": clamp(100 - final.cost_index + min(0, cost_delta) * 0.5),
@@ -185,7 +173,7 @@ def detect_risks(
     if final.delivery_delay >= 3 or delay_delta >= 1.5:
         risks.append("交付延迟严重，客户满意度下降")
     if final.profit_margin < 0:
-        risks.append("全链亏损预警，需紧急调整方案")
+        risks.append("全链亏损预警，需调整行为体配置或种子事件")
     if any("监管" in event for event in key_events):
         risks.append("出现监管介入信号，需准备合规说明")
     if final.service_level < 0.7:
@@ -196,50 +184,27 @@ def detect_risks(
 def recommend(scores: dict[str, float], risks: list[str]) -> str:
     average = sum(scores.values()) / max(len(scores), 1)
     if average >= 75 and not risks:
-        return "可优先采用"
+        return "演化趋势健康，可参照执行"
     if average >= 60:
-        return "修改后采用"
-    return "不建议直接执行"
+        return "整体可控，需针对风险点调整"
+    return "演化结果不理想，建议调整行为体配置或种子事件"
 
 
-def select_winner(strategy_reports: list[StrategyReport]) -> str | None:
-    if not strategy_reports:
-        return None
-    ranked = sorted(
-        strategy_reports,
-        key=lambda item: sum(item.scores.values()) / max(len(item.scores), 1),
-        reverse=True,
-    )
-    return ranked[0].strategy_name
-
-
-def build_executive_summary(strategy_reports: list[StrategyReport], winner: str | None) -> str:
-    if not strategy_reports:
-        return "暂无可评估的方案结果。"
-    summary = f"综合库存、成本、交付时效和服务水平表现，当前推荐方案为：{winner}。" if winner else ""
-    worst_cost = max(strategy_reports, key=lambda item: item.final_cost)
-    riskiest = max(strategy_reports, key=lambda item: len(item.risks))
-    summary += f"{worst_cost.strategy_name} 的最终成本最高，需重点控制成本结构。"
-    if riskiest.risks:
-        summary += f"{riskiest.strategy_name} 暴露的风险最多，建议修订决策参数和应急预案。"
-    return summary
-
-
-def build_strategy_summary(
-    name: str,
+def build_evolution_summary(
+    rounds: list[WorldState],
     final: WorldState,
     inventory_delta: float,
     cost_delta: float,
-    delay_delta: float,
     service_delta: float,
     margin_delta: float,
+    key_events: list[str],
 ) -> str:
+    first = rounds[0]
+    cycles = max(len(rounds) - 1, 0)
     return (
-        f"{name} 最终库存 {final.inventory_level:.1f}，成本 {final.cost_index:.1f}，"
-        f"交付延迟 {final.delivery_delay:.1f} 周期，服务水平 {final.service_level:.0%}，"
-        f"利润率 {final.profit_margin:+.1%}；"
-        f"库存变化 {inventory_delta:+.1f}，成本变化 {cost_delta:+.1f}，"
-        f"延迟变化 {delay_delta:+.1f}，服务变化 {service_delta:+.2f}，"
-        f"利润变化 {margin_delta:+.1%}。"
+        f"共推演 {cycles} 个周期：库存 {first.inventory_level:.1f} → {final.inventory_level:.1f}"
+        f"（{inventory_delta:+.1f}），成本 {first.cost_index:.1f} → {final.cost_index:.1f}"
+        f"（{cost_delta:+.1f}），服务水平 {first.service_level:.0%} → {final.service_level:.0%}"
+        f"（{service_delta:+.2f}），利润率 {first.profit_margin:+.1%} → {final.profit_margin:+.1%}"
+        f"（{margin_delta:+.1%}）；期间触发关键事件 {len(key_events)} 起。"
     )
-
