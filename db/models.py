@@ -352,6 +352,19 @@ class SimulationRoundRepository:
         ).fetchall()
         return [SimulationRound(**dict(row)) for row in rows]
 
+    def delete_for_simulation(self, simulation_id: int) -> None:
+        """删除指定仿真记录的全部轮次与发言数据。"""
+        with self.db.transaction() as conn:
+            conn.execute(
+                "DELETE FROM agent_messages WHERE round_id IN "
+                "(SELECT id FROM simulation_rounds WHERE simulation_id = ?)",
+                (simulation_id,),
+            )
+            conn.execute(
+                "DELETE FROM simulation_rounds WHERE simulation_id = ?",
+                (simulation_id,),
+            )
+
 
 class ReportRepository:
     """报告持久化。"""

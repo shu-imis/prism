@@ -202,6 +202,7 @@ class SimulationPage(QWidget):
         self._running = False
         self._worker = None
         self._vendor_state: dict[int, dict[str, str]] = {}
+        self._signals_cleaned = False
         self._build()
 
     def _build(self):
@@ -297,7 +298,7 @@ class SimulationPage(QWidget):
         self._start.clicked.connect(self._toggle)
         br.addWidget(self._start)
         rst = SecondaryBtn("↺ 重置")
-        rst.clicked.connect(self._reset)
+        rst.clicked.connect(self._on_reset)
         br.addWidget(rst)
         br.addStretch()
         il.addLayout(br)
@@ -370,6 +371,13 @@ class SimulationPage(QWidget):
         self._save_current_vendor_state()
         self._provider_index = index
         self._apply_vendor_state(index)
+
+    def log(self, text: str, is_error: bool = False):
+        """向日志区追加一行，错误信息以红色显示。"""
+        if is_error:
+            self._log.append(f"<span style='color:#CC3333'>{text}</span>")
+        else:
+            self._log.append(text)
 
     def _toggle_config(self):
         cv = self._config_widget
@@ -502,15 +510,20 @@ class SimulationPage(QWidget):
                     w.wait(2000)
         except RuntimeError:
             pass  # C++ 对象已被 deleteLater 清理
+        if not self._signals_cleaned:
+            try:
+                w.progress.disconnect()
+                w.round_done.disconnect()
+                w.succeeded.disconnect()
+                w.failed.disconnect()
+                w.recoverable.disconnect()
+            except (RuntimeError, TypeError):
+                pass
         try:
-            w.progress.disconnect()
-            w.round_done.disconnect()
-            w.succeeded.disconnect()
-            w.failed.disconnect()
-            w.recoverable.disconnect()
             w.finished.disconnect()
         except (RuntimeError, TypeError):
             pass
+        self._signals_cleaned = False
         try:
             w.deleteLater()
         except RuntimeError:
@@ -534,6 +547,7 @@ class SimulationPage(QWidget):
             w.recoverable.disconnect()
         except (RuntimeError, TypeError):
             pass
+        self._signals_cleaned = True
         # 注意：不在此处置 self._worker = None，否则 _toggle 重启时无法
         # 调用 _dispose_worker 等待旧线程。deleteLater 足以保证对象回收。
 
@@ -550,6 +564,12 @@ class SimulationPage(QWidget):
         self.log(msg, is_error=True)
         self._start.setText("▶ 重试")
         self._start.setEnabled(True)
+        if self._pid:
+            project = ProjectRepository().get_by_id(self._pid)
+            if project and project.status == "running":
+                ProjectRepository().update_scenario(
+                    self._pid, dict(project.scenario), status="draft"
+                )
         self.state_changed.emit()
 
     def _on_recoverable(self, msg):
@@ -557,6 +577,12 @@ class SimulationPage(QWidget):
         self.log(msg, is_error=True)
         self._start.setText("↺ 恢复")
         self._start.setEnabled(True)
+        if self._pid:
+            project = ProjectRepository().get_by_id(self._pid)
+            if project:
+                ProjectRepository().update_scenario(
+                    self._pid, dict(project.scenario), status="interrupted"
+                )
         self.state_changed.emit()
 
     def _on_progress(self, current, total, message):
@@ -623,6 +649,27 @@ class SimulationPage(QWidget):
         except RuntimeError:
             pass  # C++ 对象已被 deleteLater 清理
 
+    def _on_reset(self):
+        """显式重置：停止工作线程，清除检查点与历史轮次后还原仿真页面状态。"""
+        self._dispose_worker()
+        if self._pid:
+            CheckpointRepository().delete_for_project(self._pid)
+            main = next(
+                (s for s in SimulationRepository().list_by_project(self._pid)
+                 if s.name == MAIN_SIMULATION_NAME),
+                None,
+            )
+            if main:
+                SimulationRoundRepository().delete_for_simulation(main.id)
+            # 将项目状态回退到草稿，避免项目列表显示过期状态
+            project = ProjectRepository().get_by_id(self._pid)
+            if project and project.status != "draft":
+                ProjectRepository().update_scenario(
+                    self._pid, dict(project.scenario), status="draft"
+                )
+        self._reset()
+        self.state_changed.emit()
+
     def _reset(self):
         self._running = False
         self._bar.setValue(0)
@@ -632,6 +679,3 @@ class SimulationPage(QWidget):
         self._start.setEnabled(True)
         for v in self._mv.values():
             v.setText("—")
-        # 清除检查点，确保重置后从头仿真
-        if self._pid:
-            CheckpointRepository().delete_for_project(self._pid)

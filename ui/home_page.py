@@ -7,8 +7,18 @@ from ui.styles import *
 from ui.widgets import Title, Caption, PrimaryBtn, StatusDot
 from db.models import ProjectRepository
 
-_STATUS_COLORS = {"draft": COLOR_ORANGE, "running": COLOR_BLUE, "completed": COLOR_GREEN}
-_STATUS_LABELS = {"draft": "草稿", "running": "运行中", "completed": "已完成"}
+_STATUS_COLORS = {
+    "draft": COLOR_ORANGE,
+    "running": COLOR_BLUE,
+    "interrupted": COLOR_RED,
+    "completed": COLOR_GREEN,
+}
+_STATUS_LABELS = {
+    "draft": "草稿",
+    "running": "运行中",
+    "interrupted": "已中断",
+    "completed": "已完成",
+}
 
 
 class HomePage(QWidget):

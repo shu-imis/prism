@@ -31,7 +31,6 @@ class ProcessPage(QWidget):
         super().__init__(parent)
         self._pid = None
         self._step = 0
-        self._sim_done = False
         self._saved_steps: set[int] = set()
         self._build()
         self._wire()
@@ -148,7 +147,6 @@ class ProcessPage(QWidget):
 
     def _on_done(self, r, res):
         self._p("仿真已完成")
-        self._sim_done = True
         self._update()
         self._rp.set_report(r, res)
         # 持久化报告（主线程）；仿真轮次已由引擎自行落库
@@ -173,12 +171,12 @@ class ProcessPage(QWidget):
         if self._step == 0:
             self._ep._save()
         elif self._step == 1:
-            if self._sim_done:
+            if self._is_sim_done():
                 self._advance()
             else:
                 self._sp._save()
         elif self._step == 2:
-            if self._sim_done:
+            if self._is_sim_done():
                 self._advance()
             else:
                 self._smp._toggle()
@@ -214,7 +212,7 @@ class ProcessPage(QWidget):
         self._back.setVisible(self._step > 0)
 
         if self._step == 2:
-            if self._sim_done:
+            if self._is_sim_done():
                 self._next.setText("下一步 →")
             else:
                 self._next.setText("▶ 启动仿真")
@@ -238,15 +236,16 @@ class ProcessPage(QWidget):
                 return "已保存", COLOR_GREEN
             return "编辑中", TEXT_MUTED
         if self._step == 2:
-            # 正在运行的仿真优先于历史完成态（重新运行时显示"仿真中"）
             if self._smp.is_running():
-                return "仿真中…", COLOR_BLUE
-            if self._pid and CheckpointRepository().latest_for_project(self._pid):
-                return "待恢复", COLOR_ORANGE
-            if self._sim_done:
-                return "已完成", COLOR_GREEN
-            return "待启动", TEXT_MUTED
-        if self._sim_done:
+                return "运行中", COLOR_BLUE
+            if self._pid:
+                project = ProjectRepository().get_by_id(self._pid)
+                if project and project.status == "interrupted":
+                    return "已中断", COLOR_RED
+                if project and project.status == "completed":
+                    return "已完成", COLOR_GREEN
+            return "草稿", TEXT_MUTED
+        if self._is_sim_done():
             return "已完成", COLOR_GREEN
         return "待仿真", TEXT_MUTED
 
@@ -259,20 +258,24 @@ class ProcessPage(QWidget):
         # 先确定各步骤完成态，再刷新状态指示
         reports = ReportRepository().list_by_project(pid)
         project = ProjectRepository().get_by_id(pid)
-        # Step 4 的数据可从轮次重建，故完成态 = 有报告或有轮次（容忍仿真中断/报告缺失）
-        self._sim_done = bool(reports) or self._has_rounds(pid)
+        # Step 4 的数据可从轮次重建，故有数据 = 曾有仿真运行过
+        has_data = bool(reports) or self._has_rounds(pid)
         self._saved_steps = {0}
         if project and project.scenario.get("agents_config"):
             self._saved_steps.add(1)
         if project and project.status == "running":
             # 重启后不存在仍在运行的仿真，running 必为陈旧状态
-            stale = "completed" if self._sim_done else "draft"
+            stale = "completed" if has_data else "draft"
             ProjectRepository().update_scenario(pid, dict(project.scenario), status=stale)
+        elif project and project.status == "interrupted":
+            # 检查点已丢失则回退为草稿
+            if not CheckpointRepository().latest_for_project(pid):
+                ProjectRepository().update_scenario(pid, dict(project.scenario), status="draft")
         self._update()
         self._log.clear()
         self._ep.load_project(pid)
         self._p(f"项目已加载（#{pid}）")
-        if self._sim_done:
+        if self._is_sim_done():
             self._smp.load_project(pid)    # 预加载 Step 3 历史
             self._rp.load_results(pid)     # 预加载 Step 4 报告
 
@@ -289,6 +292,13 @@ class ProcessPage(QWidget):
             and SimulationRoundRepository().list_by_simulation(main_record.id)
         )
 
+    def _is_sim_done(self) -> bool:
+        """仿真是否已完成（以 DB 项目状态为唯一真相来源）。"""
+        if not self._pid:
+            return False
+        project = ProjectRepository().get_by_id(self._pid)
+        return project is not None and project.status == "completed"
+
     def stop_worker(self):
         """安全停止仿真工作线程，供主窗口关闭时调用。"""
         self._smp.stop_worker()
@@ -296,7 +306,6 @@ class ProcessPage(QWidget):
     def reset(self):
         self._pid = None
         self._step = 0
-        self._sim_done = False
         self._saved_steps = set()
         self._update()
         self._log.clear()
