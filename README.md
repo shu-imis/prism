@@ -10,18 +10,20 @@
 供应链搭建 → 行为体性格配置 → 多行为体仿真 → 演化分析 → 导出报告
 ```
 
-1. **供应链搭建** — 定义行业、节点、初始库存/成本/服务水平，导入背景文档
-2. **行为体性格配置** — 调整 7 类行为体的决策倾向/活跃度/影响力/画像，配置注入世界的种子事件
+1. **供应链搭建** — 定义行业、节点、初始库存/成本/服务水平，导入背景文档，可由 AI 分析文档自动填写
+2. **行为体性格配置** — 调整 7 类行为体的决策倾向/活跃度/影响力/画像，配置注入世界的种子事件，可由 AI 一键生成
 3. **多行为体仿真** — 7 类行为体（供应商→制造商→分销商→零售商→物流→消费者→监管）在单一世界中互动推演，实时显示库存/成本/服务水平/利润率/交付延迟
-4. **演化分析** — 演化时间线、指标数据表、六维评估，导出 Markdown
+4. **演化分析** — 深色结论横幅、AI 综合分析、指标演化曲线、六维雷达、演化过程泳道图，导出 Markdown
 
 ## 核心特性
 
+- **全链路 AI 集成**：Step1 文档分析自动填写场景、Step2 AI 生成行为体配置、Step3 行为体决策、Step4 AI 叙述式综合分析（失败自动降级为公式报告）
+- **全局设置页**：8 家厂商预设（OpenAI / Anthropic / DeepSeek / 通义千问 / Kimi / 智谱 / 阶跃星辰 / 自定义），统一生效厂商，仿真轮次/决策温度/超时/重试可视化配置
 - **多行为体 LLM 仿真**：每个行为体由独立 LLM prompt 驱动，根据全局状态自主决策
 - **行为体互动**：行动信息流 + 个性化观察层，行为体感知上下游邻居行动并显式回应，跨轮形成反应链
 - **种子事件注入**：世界干预在指定周期进入信息流，沿供应链链路传播扩散（MiroFish initial_posts 式）
 - **关键事件系统**：5 种供应链事件（断供、爆仓、价格战、监管介入、需求激增）动态触发
-- **演化分析**：演化时间线（事件与行为体反应链）+ 指标数据表 + 六维评估
+- **演化分析**：AI 综合分析 + 指标演化曲线 + 六维雷达图 + 行为体×周期泳道图
 - **检查点恢复**：每轮自动持久化，中断后可无缝继续
 - **RAG 知识检索**：导入 PDF/Word/Markdown 文档，仿真中自动检索相关背景
 
@@ -30,7 +32,7 @@
 ```bash
 pip install -r requirements.txt
 cp .env.example .env    # 编辑 .env，填入 LLM API Key
-python main.py
+python main.py          # 也可启动后在「设置」页直接填写并保存
 ```
 
 ## 桌面端打包（GitHub Actions）
@@ -61,7 +63,7 @@ git push origin v0.1.0
 | 用途 | 技术 |
 |------|------|
 | 桌面 UI | PySide6 |
-| LLM 调用 | OpenAI / Anthropic SDK（双厂商 fallback） |
+| LLM 调用 | OpenAI-compatible / Anthropic SDK（8 家厂商预设，统一生效厂商） |
 | 数据存储 | SQLite（WAL 模式） |
 | 报告导出 | Markdown |
 | 文档解析 | pypdf + python-docx |
@@ -80,14 +82,17 @@ prism/
 │   ├── main_window.py
 │   ├── title_bar.py              # 自定义标题栏（macOS / Windows）
 │   ├── home_page.py
+│   ├── settings_page.py         # 设置 — 全局 LLM 配置与仿真参数
 │   ├── process_page.py          # 4 步工作流协调
 │   ├── event_page.py            # 供应链搭建（Step 01）
 │   ├── persona_page.py          # 行为体性格配置（Step 02）
 │   ├── simulation_page.py       # 仿真运行（Step 03）
 │   ├── result_page.py           # 演化分析（Step 04）
+│   ├── ai_worker.py             # 通用 AI 调用工作线程
+│   ├── charts.py                # 折线图 / 雷达图 / 泳道图组件
 │   ├── widgets.py
 │   ├── styles.py
-│   └── text_utils.py            # 文本规范化
+│   └── text_utils.py            # 文本规范化（兼容导出）
 ├── core/                        # 仿真引擎 + 行为体 + 事件
 │   ├── agent.py
 │   ├── agent_factory.py
@@ -95,10 +100,13 @@ prism/
 │   ├── document_importer.py
 │   ├── scenario_parser.py
 │   ├── simulation_engine.py
+│   ├── text_utils.py            # 发言标点规范化
 │   ├── world_state.py
 │   └── events.py
-├── llm/                         # LLM 客户端 + Prompt
+├── llm/                         # LLM 客户端 + 配置 + 业务调用 + Prompt
 │   ├── client.py
+│   ├── config.py
+│   ├── analysis.py
 │   └── prompts.py
 ├── report/                      # 报告生成 + 导出 + 时间线
 │   ├── generator.py

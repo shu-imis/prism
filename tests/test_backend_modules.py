@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from config import app_config
 from core.action_feed import ActionFeed, ActionRecord
 from core.agent_factory import AgentFactory
 from core.document_importer import chunk_text, import_documents, render_imported_documents
@@ -20,8 +24,10 @@ from db.models import (
     KnowledgeRepository,
 )
 from llm.client import LLMClient, LLMProvider, ProviderSettings
+import llm.analysis as llm_analysis
+import llm.config as llm_config
 from report.exporter import ReportExporter
-from report.generator import ReportGenerator
+from report.generator import ReportGenerator, SimulationReport
 
 
 class BackendModuleTests(unittest.TestCase):
@@ -29,7 +35,9 @@ class BackendModuleTests(unittest.TestCase):
         def fake_transport(provider, messages, options):
             system = messages[0]["content"]
             user_msg = messages[1]["content"] if len(messages) > 1 else ""
-            if "监管机构" in system or "监管方" in system:
+            # 注意：system prompt 含全部行为体名单（互动规则），
+            # 必须用画像首句识别行为体，不能用「供应商」等泛关键词
+            if "你代表政府监管机构" in system:
                 if "风险" in user_msg:
                     return (
                         '{"inventory_change": 0, "cost_change": 5, "delay_change": 0.5, '
@@ -43,21 +51,21 @@ class BackendModuleTests(unittest.TestCase):
                     '"pressure_change": 0.0, "risk_description": "", '
                     '"response_summary": "监管机构保持关注", "decision_shift": "none"}'
                 )
-            if "供应商" in system:
+            if "你是一家原材料供应商" in system:
                 return (
                     '{"inventory_change": -5, "cost_change": 8, "delay_change": 1.0, '
                     '"service_change": -0.03, "margin_change": -0.04, '
                     '"pressure_change": 0.1, "risk_description": "原材料价格波动", '
                     '"response_summary": "供应商收紧供应承诺", "decision_shift": "toward_cautious"}'
                 )
-            if "零售商" in system:
+            if "你是一家终端零售商" in system:
                 return (
                     '{"inventory_change": -10, "cost_change": -3, "delay_change": 0.2, '
                     '"service_change": 0.02, "margin_change": -0.05, '
                     '"pressure_change": 0.08, "risk_description": "促销导致利润压缩", '
                     '"response_summary": "零售商启动促销清库存", "decision_shift": "toward_aggressive"}'
                 )
-            if "制造商" in system:
+            if "你是一家核心制造商" in system:
                 return (
                     '{"inventory_change": 3, "cost_change": 2, "delay_change": -0.5, '
                     '"service_change": 0.05, "margin_change": 0.03, '
@@ -185,6 +193,10 @@ class BackendModuleTests(unittest.TestCase):
 
             self.assertEqual(len(repo.list_by_project(project.id)), 2)
             self.assertEqual(hits[0].source, "a.md")
+
+            # 空列表替换 = 清空知识库（设置页/Step1 清空入口依赖此语义）
+            repo.replace_for_project(project.id, [])
+            self.assertEqual(repo.list_by_project(project.id), [])
             db.close()
 
     def test_checkpoint_repository_round_trip(self) -> None:
@@ -339,6 +351,10 @@ class BackendModuleTests(unittest.TestCase):
         self.assertNotEqual(rounds[-1].inventory_level, rounds[0].inventory_level)
         self.assertTrue(any(snapshot.spoke for snapshot in rounds[-1].agent_states.values()))
         self.assertEqual(len(round_payloads), 2)
+        # 供应商连续两轮 delay_change=1.0 > 0.5，第 2 轮触发原材料断供
+        self.assertTrue(
+            any("断供" in event.description for event in rounds[-1].key_events)
+        )
 
     def test_simulation_engine_persists_single_world_rounds(self) -> None:
         """验证单世界仿真轮次持久化到 SQLite。"""
@@ -373,7 +389,8 @@ class BackendModuleTests(unittest.TestCase):
         """验证单个行为体 LLM 调用失败时跳过而不中断仿真。"""
         def fake_transport(provider, messages, options):
             system = messages[0]["content"]
-            if "供应商" in system:
+            # 用画像首句识别供应商（system prompt 含全部行为体名单，泛关键词会误匹配）
+            if "你是一家原材料供应商" in system:
                 raise RuntimeError("model timeout")
             return (
                 '{"inventory_change": 1, "cost_change": 1, "delay_change": 0.1, '
@@ -434,6 +451,8 @@ class BackendModuleTests(unittest.TestCase):
 
             with self.assertRaises(RuntimeError):
                 engine.run()
+            # 首轮开始前已写入初始状态检查点，致命失败后仍存在
+            self.assertIsNotNone(checkpoint_repo.latest_for_project(project.id))
             db.close()
 
     def test_simulation_engine_resumes_from_checkpoint(self) -> None:
@@ -526,7 +545,7 @@ class BackendModuleTests(unittest.TestCase):
 
     def test_normalize_speech(self) -> None:
         """验证行为体发言标点规范化。"""
-        from ui.text_utils import normalize_speech
+        from core.text_utils import normalize_speech
 
         # 英文标点转全角（仅 CJK 语境）
         self.assertEqual(normalize_speech("库存不足,需要补货;尽快"), "库存不足，需要补货；尽快。")
@@ -616,7 +635,7 @@ class BackendModuleTests(unittest.TestCase):
         def fake_transport(provider, messages, options):
             system = messages[0]["content"]
             seen_systems.append(system)
-            if "供应商" in system:
+            if "你是一家原材料供应商" in system:
                 return (
                     '{"action_type": "adjust_supply", "reaction_to": "none", '
                     '"inventory_change": -5, "cost_change": 8, "delay_change": 1.0, '
@@ -687,8 +706,49 @@ class BackendModuleTests(unittest.TestCase):
         round_one, round_two = seen_prompts[:7], seen_prompts[7:]
         self.assertTrue(all("港口罢工导致物流中断" not in prompt for prompt in round_one))
         self.assertTrue(all("港口罢工导致物流中断" in prompt for prompt in round_two))
-        # 信息流中 agent_id=0 的种子事件以 action_type=seed 渲染进观察条目
-        self.assertTrue(any("世界事件" in prompt and "【seed】" in prompt for prompt in round_two))
+        # 信息流中 agent_id=0 的种子事件以环境事件格式渲染进观察条目（标注不可回应）
+        self.assertTrue(any("世界事件" in prompt and "不可作为回应对象" in prompt for prompt in round_two))
+
+    def test_knowledge_context_reaches_agent_prompt(self) -> None:
+        """RAG 接线：知识库内容经引擎线程串行检索进入行为体 prompt。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(Path(tmp) / "prism.db")
+            db.migrate()
+            project = ProjectRepository(db).create("Demo", {"industry": "electronics"})
+            KnowledgeRepository(db).replace_for_project(project.id, [
+                {"source": "case.md", "chunk_index": 0,
+                 "content": "华东港口 汛期 物流 管制 原材料 交付 延迟"},
+            ])
+
+            seen_users: list[str] = []
+
+            def fake_transport(provider, messages, options):
+                seen_users.append(messages[1]["content"])
+                return (
+                    '{"action_type": "maintain", "reaction_to": "none", '
+                    '"inventory_change": 1, "cost_change": 1, "delay_change": 0.1, '
+                    '"service_change": 0.01, "margin_change": 0.01, "pressure_change": 0.0, '
+                    '"risk_description": "", "response_summary": "正常运作", "decision_shift": "none"}'
+                )
+
+            client = LLMClient(
+                providers=[ProviderSettings(LLMProvider.OPENAI, "gpt-4o-mini", "key")],
+                max_retries=0,
+                transport=fake_transport,
+            )
+            engine = SimulationEngine(llm_client=client, random_seed=1)
+            engine.configure(
+                self._always_active_agents(),
+                ScenarioParser.parse("Demo", "电子制造", "供应链压力 原材料 交付", initial_inventory=75, baseline_cost=55),
+                max_rounds=1,
+                project_id=project.id,
+                knowledge_repository=KnowledgeRepository(db),
+            )
+            engine.run()
+
+            # 检索命中后，知识块原文应出现在 user message 的 knowledge_context 段
+            self.assertTrue(any("华东港口" in u for u in seen_users))
+            db.close()
 
     def test_agent_factory_apply_overrides(self) -> None:
         """验证按行为体 id 的性格覆盖生效，未覆盖行为体保持模板默认。"""
@@ -714,6 +774,379 @@ class BackendModuleTests(unittest.TestCase):
         self.assertEqual(untouched.profile, template["profile"])
 
         self.assertIs(AgentFactory.apply_overrides(agents, None), agents)
+
+    def test_reaction_to_validation_and_fallback(self) -> None:
+        """reaction_to 只保留合法行为体名：多目标取首个，节点名/世界事件/自身降级 none。"""
+        def fake_transport(provider, messages, options):
+            system = messages[0]["content"]
+            if "核心制造商" in system:
+                reaction = '"世界事件"'              # 环境事件 → none
+            elif "终端零售商" in system:
+                reaction = '"制造商、分销商"'        # 多目标 → 取首个合法
+            elif "政府监管机构" in system:
+                reaction = '"自营门店"'              # 场景节点名 → none
+            elif "原材料供应商。你关注" in system:
+                reaction = '"原材料供应商"'          # 自身 → none
+            else:
+                reaction = '"none"'
+            return (
+                '{"action_type": "maintain", "reaction_to": ' + reaction + ', '
+                '"inventory_change": 1, "cost_change": 1, "delay_change": 0.1, '
+                '"service_change": 0.01, "margin_change": 0.01, "pressure_change": 0.0, '
+                '"risk_description": "", "response_summary": "正常运作", "decision_shift": "none"}'
+            )
+
+        client = LLMClient(
+            providers=[ProviderSettings(LLMProvider.OPENAI, "gpt-4o-mini", "key")],
+            max_retries=0,
+            transport=fake_transport,
+        )
+        engine = SimulationEngine(llm_client=client, random_seed=1)
+        payloads = []
+        engine.set_round_callback(lambda state, messages: payloads.append(messages))
+        engine.configure(
+            self._always_active_agents(),
+            ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
+            max_rounds=1,
+        )
+        engine.run()
+
+        by_name = {m["agent_name"]: m for messages in payloads for m in messages}
+        self.assertEqual(by_name["制造商"]["reaction_to"], "none")
+        self.assertIn("降级", by_name["制造商"]["metrics"]["warning"])
+        self.assertEqual(by_name["零售商"]["reaction_to"], "制造商")
+        self.assertIn("多个对象", by_name["零售商"]["metrics"]["warning"])
+        self.assertEqual(by_name["监管机构"]["reaction_to"], "none")
+        self.assertEqual(by_name["原材料供应商"]["reaction_to"], "none")
+        self.assertEqual(by_name["分销商"]["reaction_to"], "none")
+        self.assertEqual(by_name["分销商"]["metrics"]["warning"], "")
+
+    def test_feed_marks_seed_not_reactable_and_recalls_own_speech(self) -> None:
+        """种子事件条目标注不可回应；last_entry_for 回显自身上轮发言并进入 prompt。"""
+        feed = ActionFeed()
+        feed.append([
+            ActionRecord(
+                round=1, agent_id=0, agent_name="世界事件", role="外部干预",
+                action_type="seed", content="港口罢工导致物流中断", influence=2.5,
+            ),
+            ActionRecord(
+                round=1, agent_id=2, agent_name="制造商", role="核心制造商",
+                action_type="adjust_supply", content="制造商上轮发言内容",
+            ),
+        ])
+        seed_entry = feed._records[0].format_entry()
+        self.assertIn("不可作为回应对象", seed_entry)
+        self.assertNotIn("【seed】", seed_entry)
+        self.assertEqual(feed.last_entry_for(2).content, "制造商上轮发言内容")
+        self.assertIsNone(feed.last_entry_for(3))
+
+        # 端到端：第 2 轮制造商的 system prompt 包含其上轮发言与互动规则
+        seen_systems: list[str] = []
+
+        def fake_transport(provider, messages, options):
+            seen_systems.append(messages[0]["content"])
+            return (
+                '{"action_type": "maintain", "reaction_to": "none", '
+                '"inventory_change": 1, "cost_change": 1, "delay_change": 0.1, '
+                '"service_change": 0.01, "margin_change": 0.01, "pressure_change": 0.0, '
+                '"risk_description": "", "response_summary": "本轮新发言", "decision_shift": "none"}'
+            )
+
+        client = LLMClient(
+            providers=[ProviderSettings(LLMProvider.OPENAI, "gpt-4o-mini", "key")],
+            max_retries=0,
+            transport=fake_transport,
+        )
+        engine = SimulationEngine(llm_client=client, random_seed=7)
+        engine.configure(
+            self._always_active_agents(),
+            ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
+            max_rounds=2,
+        )
+        engine.run()
+
+        manufacturer_systems = [s for s in seen_systems if "你是一家核心制造商" in s]
+        self.assertEqual(len(manufacturer_systems), 2)
+        self.assertIn("（首轮，暂无上轮发言）", manufacturer_systems[0])
+        self.assertIn("本轮新发言", manufacturer_systems[1])
+        self.assertIn("不可回应", manufacturer_systems[1])
+        self.assertIn("禁止编造具体数量", manufacturer_systems[1])
+
+    def test_observation_collapses_repeated_actions(self) -> None:
+        """观察层：同一行为体相邻轮次内容高度相似时折叠旧条目为「持续中」。"""
+        engine = SimulationEngine(llm_client=self._fake_llm_client(), random_seed=1)
+        agents = self._always_active_agents()
+        engine.configure(
+            agents,
+            ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
+            max_rounds=1,
+        )
+        repeated = "小幅提升排产量，动态跟踪上游供应变化，灵活调整排产节奏，保障交付履约。"
+        feed = ActionFeed()
+        feed.append([
+            ActionRecord(
+                round=1, agent_id=1, agent_name="原材料供应商", role="上游供应商",
+                action_type="adjust_supply", content=repeated,
+            ),
+            ActionRecord(
+                round=2, agent_id=1, agent_name="原材料供应商", role="上游供应商",
+                action_type="adjust_supply", content=repeated + "略有调整",
+            ),
+        ])
+
+        manufacturer = next(a for a in agents if a.id == 2)
+        observation = engine._build_observation(manufacturer, agents, feed, WorldState())
+
+        self.assertIn("持续中", observation)
+        self.assertEqual(observation.count(repeated), 1)  # 旧条目被折叠，只出现一次
+
+        # 内容差异大时不折叠
+        feed2 = ActionFeed()
+        feed2.append([
+            ActionRecord(
+                round=1, agent_id=1, agent_name="原材料供应商", role="上游供应商",
+                action_type="adjust_supply", content="收紧供应承诺，优先保障核心客户。",
+            ),
+            ActionRecord(
+                round=2, agent_id=1, agent_name="原材料供应商", role="上游供应商",
+                action_type="reduce_orders", content="因环保限产大幅削减非优先级订单接收。",
+            ),
+        ])
+        observation2 = engine._build_observation(manufacturer, agents, feed2, WorldState())
+        self.assertNotIn("持续中", observation2)
+
+    def test_decision_temperature_from_config(self) -> None:
+        """行为体决策温度取自 app_config.llm.decision_temperature。"""
+        seen_options: list[dict] = []
+
+        def fake_transport(provider, messages, options):
+            seen_options.append(options)
+            return (
+                '{"action_type": "maintain", "reaction_to": "none", '
+                '"inventory_change": 1, "cost_change": 1, "delay_change": 0.1, '
+                '"service_change": 0.01, "margin_change": 0.01, "pressure_change": 0.0, '
+                '"risk_description": "", "response_summary": "正常运作", "decision_shift": "none"}'
+            )
+
+        client = LLMClient(
+            providers=[ProviderSettings(LLMProvider.OPENAI, "gpt-4o-mini", "key")],
+            max_retries=0,
+            transport=fake_transport,
+        )
+        engine = SimulationEngine(llm_client=client, random_seed=1)
+        engine.configure(
+            self._always_active_agents(),
+            ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
+            max_rounds=1,
+        )
+        with mock.patch.object(app_config.llm, "decision_temperature", 0.5):
+            engine.run()
+
+        self.assertTrue(seen_options)
+        self.assertTrue(all(o["temperature"] == 0.5 for o in seen_options))
+
+    def test_report_save_or_update_latest(self) -> None:
+        """save_or_update_latest：首次插入，再次调用更新同一行，reports 表不膨胀。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(Path(tmp) / "prism.db")
+            db.migrate()
+            project = ProjectRepository(db).create("Demo", {})
+            repo = ReportRepository(db)
+
+            first_id = repo.save_or_update_latest(
+                project_id=project.id, title="报告", markdown="v1", summary={"n": 1}
+            )
+            second_id = repo.save_or_update_latest(
+                project_id=project.id, title="报告", markdown="v2",
+                summary={"n": 2, "ai_analysis": {"evolution_analysis": "x"}},
+            )
+
+            self.assertEqual(first_id, second_id)
+            reports = repo.list_by_project(project.id)
+            self.assertEqual(len(reports), 1)
+            self.assertEqual(reports[0].markdown, "v2")
+            self.assertEqual(reports[0].summary["n"], 2)
+            db.close()
+
+    def test_export_normalizes_speech_punctuation(self) -> None:
+        """导出的 Markdown 时间线与 UI 一样经过标点规范化（句末补句号）。"""
+        generator = ReportGenerator("demo", "背景")
+        rounds = [
+            WorldState(
+                round=1,
+                agent_states={
+                    2: AgentSnapshot(
+                        agent_id=2,
+                        pressure=0.1,
+                        decision_stance="cooperative",
+                        spoke=True,
+                        speech="促销订单增长,需要补货",
+                        action_type="adjust_supply",
+                        reaction_to="none",
+                    )
+                },
+            )
+        ]
+        generator.add_simulation_result(rounds)
+        report = generator.generate()
+
+        markdown = ReportExporter.to_markdown(report, rounds)
+
+        self.assertIn("促销订单增长，需要补货。", markdown)
+
+
+class AIIntegrationTests(unittest.TestCase):
+    """v0.3 全链路 AI 集成：全局配置、文档抽取、行为体生成、演化分析。"""
+
+    @staticmethod
+    def _json_client(payload: str) -> LLMClient:
+        return LLMClient(
+            providers=[ProviderSettings(LLMProvider.OPENAI, "test-model", "key")],
+            max_retries=0,
+            transport=lambda provider, messages, options: payload,
+        )
+
+    def test_vendor_state_persist_and_reload(self) -> None:
+        """厂商配置写入 .env 并可从环境变量读回，生效厂商可切换。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            state = {
+                4: {"key": "kimi-key", "url": "https://api.moonshot.cn/v1", "model": "kimi-k2"},
+            }
+            with mock.patch.dict(os.environ, {}, clear=True):
+                llm_config.persist_vendor_state(state, active_vendor=4, env_path=env_path)
+                env_text = env_path.read_text(encoding="utf-8")
+                self.assertIn("KIMI_API_KEY=", env_text)
+                self.assertIn("kimi-key", env_text)
+                self.assertEqual(llm_config.get_active_vendor(), 4)
+
+                reloaded = llm_config.load_vendor_state()
+                self.assertEqual(reloaded[4]["key"], "kimi-key")
+                self.assertEqual(reloaded[4]["model"], "kimi-k2")
+
+                settings = llm_config.get_active_provider_settings()
+                self.assertIsNotNone(settings)
+                self.assertEqual(settings.provider, LLMProvider.OPENAI)
+                self.assertEqual(settings.api_key, "kimi-key")
+
+    def test_build_llm_client_without_key_returns_none(self) -> None:
+        """未配置任何 API Key 时 build_llm_client 返回 None（AI 功能降级）。"""
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(llm_config.get_active_provider_settings())
+            self.assertIsNone(llm_config.build_llm_client())
+
+    def test_persist_env_vars(self) -> None:
+        """persist_env_vars：任意键值写入 .env 并同步当前进程环境变量。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            with mock.patch.dict(os.environ, {}, clear=True):
+                llm_config.persist_env_vars(
+                    {"SIM_MAX_ROUNDS": "16", "LLM_DECISION_TEMPERATURE": "0.5"},
+                    env_path=env_path,
+                )
+                self.assertEqual(os.environ["SIM_MAX_ROUNDS"], "16")
+                env_text = env_path.read_text(encoding="utf-8")
+                self.assertIn("SIM_MAX_ROUNDS", env_text)
+                self.assertIn("16", env_text)
+                self.assertIn("LLM_DECISION_TEMPERATURE", env_text)
+
+    def test_extract_scenario_from_docs_validates_fields(self) -> None:
+        """文档抽取：非法节点类型/越界数值被修正，背景为空时报错。"""
+        payload = (
+            '{"title": "电子产品供应链", "industry": "电子制造", '
+            '"background": "以华南制造商为核心的四级供应链。", '
+            '"nodes": ['
+            '{"name": "芯片供应商", "type": "supplier", "inventory": 80, "lead_time": 2, '
+            '"capacity": 100, "cost_index": 52, "downstream": ["制造商"]}, '
+            '{"name": "坏节点", "type": "hacker", "inventory": 999, "lead_time": -3, '
+            '"capacity": 0, "cost_index": 200}, '
+            '{"name": "", "type": "retailer"}], '
+            '"initial_inventory": 120, "baseline_cost": -5, "baseline_service_level": 1.5}'
+        )
+        result = llm_analysis.extract_scenario_from_docs(
+            self._json_client(payload), "某电子产品供应链文档内容"
+        )
+
+        self.assertEqual(result["title"], "电子产品供应链")
+        self.assertEqual(len(result["nodes"]), 2)  # 空名节点被过滤
+        bad = result["nodes"][1]
+        self.assertEqual(bad["type"], "supplier")  # 非法类型回退
+        self.assertEqual(bad["inventory"], 100)    # clamp 到上限
+        self.assertEqual(bad["lead_time"], 0)
+        self.assertEqual(result["initial_inventory"], 100)
+        self.assertEqual(result["baseline_cost"], 0)
+        self.assertEqual(result["baseline_service_level"], 1.0)
+
+        with self.assertRaises(ValueError):
+            llm_analysis.extract_scenario_from_docs(self._json_client("{}"), "文档")
+        with self.assertRaises(ValueError):
+            llm_analysis.extract_scenario_from_docs(self._json_client(payload), "")
+
+    def test_generate_agent_config_validates_and_truncates(self) -> None:
+        """行为体生成：非法 stance 回退模板默认，7 个行为体齐全，种子事件截断到 3 条。"""
+        agents_config = {
+            str(i): {"stance": "aggressive", "activity": 0.5, "influence": 1.0, "profile": f"画像{i}"}
+            for i in range(1, 8)
+        }
+        agents_config["1"]["stance"] = "reckless"      # 非法，应回退
+        agents_config["2"]["activity"] = 9.9           # 越界，应 clamp
+        seeds = [{"content": f"事件{i}", "cycle": i} for i in range(1, 6)]
+        payload = json.dumps(
+            {"agents_config": agents_config, "seed_events": seeds},
+            ensure_ascii=False,
+        )
+
+        result = llm_analysis.generate_agent_config(
+            self._json_client(payload), {"title": "t", "background": "b", "nodes": []}
+        )
+
+        self.assertEqual(len(result["agents_config"]), 7)
+        template_1 = AgentFactory.get_template(1)
+        self.assertEqual(result["agents_config"]["1"]["stance"], template_1["decision_stance"])
+        self.assertEqual(result["agents_config"]["2"]["activity"], 1.0)
+        self.assertEqual(len(result["seed_events"]), 3)
+        self.assertEqual(result["seed_events"][0]["content"], "事件1")
+
+    def test_analyze_evolution_and_report_round_trip(self) -> None:
+        """演化分析：LLM 叙述写入 report.ai_analysis，序列化往返保留；失败时抛异常供降级。"""
+        generator = ReportGenerator("demo", "背景")
+        generator.add_simulation_result([
+            WorldState(round=0, inventory_level=70, cost_index=50, service_level=0.85),
+            WorldState(round=1, inventory_level=55, cost_index=62, service_level=0.7),
+        ])
+        report = generator.generate()
+        self.assertEqual(report.ai_analysis, {})
+
+        payload = (
+            '{"evolution_analysis": "库存持续下滑，主因是供应商收紧供应。", '
+            '"risk_analysis": "断供风险沿上游传导。", '
+            '"recommendations": ["提高安全库存", "引入备选供应商"], "extra": 1}'
+        )
+        analysis = llm_analysis.analyze_evolution(
+            self._json_client(payload), report, []
+        )
+        report.ai_analysis = analysis
+
+        self.assertIn("库存持续下滑", analysis["evolution_analysis"])
+        self.assertEqual(len(analysis["recommendations"]), 2)
+
+        restored = SimulationReport.from_dict(report.to_dict())
+        self.assertEqual(restored.ai_analysis["risk_analysis"], "断供风险沿上游传导。")
+
+        markdown = ReportExporter.to_markdown(report)
+        self.assertIn("## AI 综合分析", markdown)
+        self.assertIn("提高安全库存", markdown)
+
+        def failing_transport(provider, messages, options):
+            raise RuntimeError("boom")
+
+        failing_client = LLMClient(
+            providers=[ProviderSettings(LLMProvider.OPENAI, "m", "key")],
+            max_retries=0,
+            transport=failing_transport,
+        )
+        with self.assertRaises(Exception):
+            llm_analysis.analyze_evolution(failing_client, report, [])
 
 
 if __name__ == "__main__":
