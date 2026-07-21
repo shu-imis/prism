@@ -43,7 +43,7 @@ DB_PATH = _default_db_path()
 class SimulationDefaults:
     """仿真引擎默认参数"""
     max_rounds: int = 12
-    round_timeout: int = 120     # 单轮最大耗时（秒）
+    round_timeout: int = 120     # 单轮最大耗时（秒），行为体并行调用 LLM 时仅需覆盖最慢请求
 
 
 @dataclass

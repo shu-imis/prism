@@ -1,6 +1,7 @@
 """仿真引擎 —— 真实 LLM 多行为体主循环。"""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
 import random
@@ -263,24 +264,31 @@ class SimulationEngine:
                 self._save_checkpoint(ws, agents, rounds)
                 break
 
-            round_started = time.monotonic()
             self._inject_seed_events(feed, round_index)
             active_agents = self._select_active_agents(agents, round_index)
 
             turns: list[AgentTurn] = []
-            for agent in active_agents:
-                self._wait_if_paused()
-                if self.state.status == SimStatus.ABORTED:
-                    break
-                if time.monotonic() - round_started > self.state.round_timeout:
-                    turns.append(self._skipped_turn(agent, "本轮超过最大耗时，已跳过剩余行为体。", warning="round_timeout"))
-                    continue
+            with ThreadPoolExecutor(max_workers=len(active_agents)) as executor:
+                future_to_agent = {
+                    executor.submit(self._generate_agent_turn, agent, ws, feed, agents): agent
+                    for agent in active_agents
+                }
                 try:
-                    turn = self._generate_agent_turn(agent, ws, feed=feed, agents=agents)
-                    self._apply_agent_turn(agent, turn)
-                except Exception as exc:  # noqa: BLE001 - LLM SDK 错误类型不统一
-                    turn = self._skipped_turn(agent, str(exc))
-                turns.append(turn)
+                    for future in as_completed(future_to_agent, timeout=self.state.round_timeout):
+                        agent = future_to_agent[future]
+                        try:
+                            turn = future.result()
+                        except Exception as exc:  # noqa: BLE001 - LLM SDK 错误类型不统一
+                            turn = self._skipped_turn(agent, str(exc))
+                        self._apply_agent_turn(agent, turn)
+                        turns.append(turn)
+                except TimeoutError:
+                    for future, agent in future_to_agent.items():
+                        if not future.done():
+                            future.cancel()
+                            turns.append(self._skipped_turn(agent, "本轮超过最大耗时，已跳过。", warning="round_timeout"))
+            # 按行为体 ID 排序，保证输出确定性
+            turns.sort(key=lambda t: t.agent_id)
 
             # 事件检测参数推导
             supplier_delayed = any(

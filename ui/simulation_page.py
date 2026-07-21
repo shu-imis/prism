@@ -86,6 +86,7 @@ class SimWorker(QThread):
         self._paused = False
         self._cancelled = False
         self._checkpoint = None
+        self._engine = None
 
     def set_checkpoint(self, checkpoint):
         self._checkpoint = checkpoint
@@ -99,11 +100,13 @@ class SimWorker(QThread):
     def cancel(self):
         """请求取消（协作式，由主线程调用）。
 
-        不打断进行中的仿真：engine.run() 返回后检查到取消标志，
-        跳过报告生成与结果发射，直接结束线程。
+        通过引擎的 abort() 机制让仿真在当前 LLM 调用完成后
+        保存检查点并干净退出，避免 terminate() 带来的数据风险。
         """
         self._cancelled = True
         self._paused = True
+        if self._engine is not None:
+            self._engine.abort()
 
     def run(self):
         try:
@@ -138,6 +141,7 @@ class SimWorker(QThread):
             seed_events = scenario_dict.get("seed_events", [])
 
             engine = SimulationEngine(llm)
+            self._engine = engine
             engine.configure(
                 agents, sc,
                 seed_events=seed_events,
@@ -494,20 +498,17 @@ class SimulationPage(QWidget):
         self.state_changed.emit()
 
     def _dispose_worker(self):
-        """同步等待旧 worker 线程结束后安全清理。调用方在主线程。"""
+        """同步等待旧 worker 线程结束后安全清理。调用方在主线程。
+
+        取消后等待线程自行退出（引擎在当前 LLM 调用完成后保存检查点
+        并干净结束），超时取 LLM 请求上限留足余量。
+        """
         w = self._worker
         if w is None:
             return
         try:
             w.cancel()
-            if w.isRunning():
-                w.quit()
-                # 协作式等待：给足时间让网络请求完成，避免 terminate 导致 Qt 崩溃
-                if not w.wait(5000):
-                    # 最后一招：线程卡死时强制终止。仅在替换/重置场景使用，
-                    # 仍有风险但优于对运行中的 QThread 做 deleteLater。
-                    w.terminate()
-                    w.wait(2000)
+            w.wait(35000)
         except RuntimeError:
             pass  # C++ 对象已被 deleteLater 清理
         if not self._signals_cleaned:
@@ -632,20 +633,13 @@ class SimulationPage(QWidget):
     def stop_worker(self):
         """安全停止工作线程，供主窗口关闭时调用。
 
-        采用协作式取消：先设取消标志，再 quit + wait。仅当线程卡死
-        超时才用 terminate 作为最后手段（仍有风险但窗口正在关闭别无选择）。
+        仅发送取消信号，不阻塞等待。引擎在 LLM 调用完成后自行保存
+        检查点并退出，线程结束不影响进程关闭。
         """
         if self._worker is None:
             return
-        w = self._worker
         try:
-            w.cancel()
-            if w.isRunning():
-                w.quit()
-                # 给足时间让 LLM 网络请求完成，避免 terminate 导致 Qt 崩溃
-                if not w.wait(8000):
-                    w.terminate()
-                    w.wait(2000)
+            self._worker.cancel()
         except RuntimeError:
             pass  # C++ 对象已被 deleteLater 清理
 
