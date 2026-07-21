@@ -106,7 +106,7 @@ class LLMClient:
                 providers.append(
                     ProviderSettings(
                         LLMProvider.ANTHROPIC,
-                        os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-latest"),
+                        os.getenv("ANTHROPIC_MODEL", "claude-fable-5"),
                         ant_key,
                     )
                 )
@@ -120,7 +120,7 @@ class LLMClient:
         user_message: str,
         temperature: float | None = None,
     ) -> str:
-        """兼容旧接口：传入 system prompt 与 user message，返回纯文本。"""
+        """传入 system prompt 与 user message，返回纯文本。"""
 
         return self.chat_messages(
             [
@@ -169,7 +169,7 @@ class LLMClient:
         user_message: str,
         temperature: float | None = 0.2,
     ) -> dict[str, Any]:
-        """兼容旧接口：请求 JSON 对象并解析。"""
+        """请求 JSON 对象并解析（带容错修复）。"""
 
         raw = self.chat_messages(
             [
