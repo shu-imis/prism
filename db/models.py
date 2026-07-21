@@ -390,6 +390,36 @@ class ReportRepository:
             )
         return int(cursor.lastrowid)
 
+    def save_or_update_latest(
+        self,
+        *,
+        project_id: int,
+        title: str,
+        markdown: str,
+        summary: dict[str, Any],
+    ) -> int:
+        """每个项目只保留一份主报告：有则更新最新一条，无则插入。
+
+        防止重复仿真 / 反复生成 AI 分析导致 reports 表无限膨胀
+        （结果页始终只展示最新一条，旧记录无消费方）。
+        """
+        existing = self.list_by_project(project_id)
+        if not existing:
+            return self.save(
+                project_id=project_id, title=title, markdown=markdown, summary=summary
+            )
+        report_id = existing[0].id
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE reports
+                SET title = ?, markdown = ?, summary_json = ?
+                WHERE id = ?
+                """,
+                (title, markdown, to_json(summary), report_id),
+            )
+        return int(report_id)
+
     def list_by_project(self, project_id: int) -> list[ReportRecord]:
         rows = self.db.conn.execute(
             """

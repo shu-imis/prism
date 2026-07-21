@@ -34,6 +34,9 @@ class SimulationReport:
     evolution_summary: str = ""
     recommendation: str = ""
     risks: list[str] = field(default_factory=list)
+    # LLM 生成的叙述式综合分析（evolution_analysis/risk_analysis/recommendations），
+    # 无 Key 或调用失败时为空 dict，仅保留公式化结果
+    ai_analysis: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +58,7 @@ class SimulationReport:
             "evolution_summary": self.evolution_summary,
             "recommendation": self.recommendation,
             "risks": self.risks,
+            "ai_analysis": self.ai_analysis,
         }
 
     @classmethod
@@ -78,6 +82,7 @@ class SimulationReport:
             evolution_summary=data.get("evolution_summary", ""),
             recommendation=data.get("recommendation", ""),
             risks=list(data.get("risks", [])),
+            ai_analysis=dict(data.get("ai_analysis", {}) or {}),
         )
         if data.get("generated_at"):
             report.generated_at = str(data["generated_at"])

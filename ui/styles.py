@@ -27,6 +27,22 @@ COLOR_RED = "#C46B6B"
 COLOR_ORANGE = "#D4A853"
 COLOR_BLUE = "#6B8EB3"
 
+# 语义化表面色：新增深色表面时在此登记，滚动条等派生颜色即自动适配
+BG_TERMINAL = TEXT_PRIMARY
+
+# ============================================================
+# 数据可视化色板 — 折线图 / 泳道图 / 雷达图统一取色
+# 低饱和暖灰调，与 Sigma 底色同源；各色明度一致，并置无跳色感
+# ============================================================
+CHART_BLUE = "#64809B"      # 石灰蓝
+CHART_ORANGE = "#C08A54"    # 陶土橙
+CHART_GREEN = "#7D9B76"     # 鼠尾草绿
+CHART_PURPLE = "#93799B"    # 灰紫
+CHART_RED = "#B96A67"       # 砖红
+CHART_TEAL = "#6E9696"      # 灰青
+CHART_DARK = "#46465A"      # 深石灰（强调/介入类）
+CHART_NEUTRAL = "#E3E3DD"   # 中性灰（维持/基线类，非类别色）
+
 # ============================================================
 # 尺寸
 # ============================================================
@@ -40,6 +56,67 @@ PAD_SM = 8
 PAD_MD = 12
 PAD_LG = 16
 PAD_XL = 24
+
+
+# ============================================================
+# 派生色工具：由背景色自动推导前景/把手颜色
+# 未来接入多主题时只需替换上面的调色板常量，派生逻辑不变
+# ============================================================
+
+def _luminance(hex_color: str) -> float:
+    """sRGB 感知亮度（0~1），用于判断背景深浅。"""
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def _scrollbar_qss(bg: str, scope: str = "") -> str:
+    """生成滚动条 QSS：把手基色与透明度由背景亮度自动推导（深底浅条、浅底深条）。
+
+    scope 为限定选择器（如 "#terminalLog"），空字符串表示全局。
+    """
+    dark_bg = _luminance(bg) < 0.5
+    base = 255 if dark_bg else 0
+    normal, hover, pressed = (0.28, 0.45, 0.58) if dark_bg else (0.16, 0.30, 0.42)
+    p = f"{scope} " if scope else ""
+
+    def rgba(opacity: float) -> str:
+        return f"rgba({base}, {base}, {base}, {opacity})"
+
+    return f"""
+{p}QScrollBar:vertical {{
+    background: transparent;
+    width: 10px;
+    margin: 3px 2px 3px 0;
+}}
+{p}QScrollBar::handle:vertical {{
+    background: {rgba(normal)};
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 4px;
+    min-height: 32px;
+}}
+{p}QScrollBar::handle:vertical:hover {{ background: {rgba(hover)}; }}
+{p}QScrollBar::handle:vertical:pressed {{ background: {rgba(pressed)}; }}
+{p}QScrollBar::add-line:vertical, {p}QScrollBar::sub-line:vertical {{ height: 0; }}
+{p}QScrollBar::add-page:vertical, {p}QScrollBar::sub-page:vertical {{ background: transparent; }}
+{p}QScrollBar:horizontal {{
+    background: transparent;
+    height: 10px;
+    margin: 0 2px 2px 3px;
+}}
+{p}QScrollBar::handle:horizontal {{
+    background: {rgba(normal)};
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 4px;
+    min-width: 32px;
+}}
+{p}QScrollBar::handle:horizontal:hover {{ background: {rgba(hover)}; }}
+{p}QScrollBar::handle:horizontal:pressed {{ background: {rgba(pressed)}; }}
+{p}QScrollBar::add-line:horizontal, {p}QScrollBar::sub-line:horizontal {{ width: 0; }}
+{p}QScrollBar::add-page:horizontal, {p}QScrollBar::sub-page:horizontal {{ background: transparent; }}
+"""
 
 
 def stylesheet() -> str:
@@ -109,7 +186,8 @@ QMainWindow {{ background: {BG_PAGE}; }}
     padding: 4px 13px;
     font-weight: 500;
 }}
-#secondaryBtn:hover {{ background: {BG_HOVER}; }}
+#secondaryBtn:hover {{ background: {BG_HOVER}; border-color: {TEXT_PRIMARY}; }}
+#secondaryBtn:disabled {{ color: {TEXT_MUTED}; background: {BG_SURFACE}; border-color: {BORDER}; }}
 
 #ghostBtn {{
     background: transparent;
@@ -157,39 +235,9 @@ QSlider::handle:horizontal {{
 QSlider::handle:horizontal:hover {{ background: {ACCENT}; }}
 QSlider::sub-page:horizontal {{ background: {TEXT_PRIMARY}; border-radius: 0px; }}
 
-/* ---- 滚动条 ---- */
-QScrollBar:vertical {{
-    background: transparent;
-    width: 10px;
-    margin: 3px 2px 3px 0;
-}}
-QScrollBar::handle:vertical {{
-    background: rgba(0, 0, 0, 0.16);
-    border: 2px solid transparent;
-    background-clip: padding-box;
-    border-radius: 4px;
-    min-height: 32px;
-}}
-QScrollBar::handle:vertical:hover {{ background: rgba(0, 0, 0, 0.30); }}
-QScrollBar::handle:vertical:pressed {{ background: rgba(0, 0, 0, 0.42); }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
-QScrollBar:horizontal {{
-    background: transparent;
-    height: 10px;
-    margin: 0 2px 2px 3px;
-}}
-QScrollBar::handle:horizontal {{
-    background: rgba(0, 0, 0, 0.16);
-    border: 2px solid transparent;
-    background-clip: padding-box;
-    border-radius: 4px;
-    min-width: 32px;
-}}
-QScrollBar::handle:horizontal:hover {{ background: rgba(0, 0, 0, 0.30); }}
-QScrollBar::handle:horizontal:pressed {{ background: rgba(0, 0, 0, 0.42); }}
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
-QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: transparent; }}
+/* ---- 滚动条（把手颜色由背景亮度自动推导，见 _scrollbar_qss） ---- */
+{_scrollbar_qss(BG_PAGE)}
+{_scrollbar_qss(BG_TERMINAL, scope="#terminalLog")}
 
 /* ---- 自定义标题栏 ---- */
 #titleBar {{ background: {BG_PAGE}; }}

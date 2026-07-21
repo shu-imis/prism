@@ -1,12 +1,14 @@
 """报告导出。
 
 提供 Markdown 格式的报告导出，结构与结果页一致：
-概述、背景、指标变化、指标演化数据、演化时间线、六维评估、风险与建议。
+概述、背景、指标变化、指标演化数据、演化时间线、六维评估、风险与建议、
+AI 综合分析（如有）。
 """
 from __future__ import annotations
 
 from pathlib import Path
 
+from core.text_utils import normalize_speech
 from core.world_state import WorldState
 from report.generator import SimulationReport
 from report.timeline import AGENT_NAMES, build_timeline_entries, format_rounds_span
@@ -59,6 +61,16 @@ class ReportExporter:
             lines.extend(f"- {risk}" for risk in report.risks)
         else:
             lines.append("- 暂无明显高风险信号")
+
+        ai = report.ai_analysis or {}
+        if ai.get("evolution_analysis"):
+            lines.extend(["", "## AI 综合分析", "", ai["evolution_analysis"]])
+            if ai.get("risk_analysis"):
+                lines.extend(["", "### 风险归因", "", ai["risk_analysis"]])
+            recommendations = ai.get("recommendations", [])
+            if recommendations:
+                lines.extend(["", "### AI 建议", ""])
+                lines.extend(f"- {item}" for item in recommendations)
         lines.append("")
         return "\n".join(lines)
 
@@ -96,5 +108,5 @@ class ReportExporter:
             duration = ""
             if entry["end"] > entry["start"]:
                 duration = f"（持续 {entry['end'] - entry['start'] + 1} 轮）"
-            lines.append(f"- {span}：{name}{action}{reaction}：{entry['summary']}{duration}")
+            lines.append(f"- {span}：{name}{action}{reaction}：{normalize_speech(entry['summary'])}{duration}")
         return lines
