@@ -1,6 +1,6 @@
 """关键事件定义与检测规则
 
-6 种供应链关键事件类型，触发条件与影响见 docs/prism.md §6.3。
+5 种供应链关键事件类型，触发条件与影响见 docs/prism.md §6.4。
 """
 from __future__ import annotations
 

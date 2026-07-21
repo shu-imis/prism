@@ -43,7 +43,9 @@ DB_PATH = _default_db_path()
 class SimulationDefaults:
     """仿真引擎默认参数"""
     max_rounds: int = 12
-    round_timeout: int = 120     # 单轮最大耗时（秒），行为体并行调用 LLM 时仅需覆盖最慢请求
+    # 单轮软超时（秒）：超时当轮未完成的行为体记为跳过，
+    # 但其 LLM 调用线程仍会跑完（cancel 无法中断进行中的请求）
+    round_timeout: int = 120
 
 
 @dataclass
@@ -51,6 +53,7 @@ class LLMDefaults:
     """LLM 调用默认参数"""
     default_model: str = "gpt-5.6-sol"
     temperature: float = 0.7
+    decision_temperature: float = 0.35   # 仿真行为体决策温度（较低保证结构化输出稳定）
     max_retries: int = 3
     request_timeout: int = 30
 
@@ -70,6 +73,7 @@ class AppConfig:
         llm = LLMDefaults(
             default_model=os.getenv("LLM_DEFAULT_MODEL", "gpt-5.6-sol"),
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
+            decision_temperature=float(os.getenv("LLM_DECISION_TEMPERATURE", "0.35")),
             max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
             request_timeout=int(os.getenv("LLM_REQUEST_TIMEOUT", "30")),
         )

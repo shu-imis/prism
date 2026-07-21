@@ -4,7 +4,9 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
+import difflib
 import random
+import re
 import time
 from typing import Any, Callable, Optional
 
@@ -48,6 +50,17 @@ ACTION_TYPES = {
     "shift_demand",        # 需求转移/抵制
     "intervene",           # 监管介入
 }
+
+# 观察层折叠阈值：同一行为体相邻轮次内容相似度超过该值时折叠旧条目
+OBS_COLLAPSE_SIMILARITY = 0.7
+
+
+def _text_similarity(a: str, b: str) -> float:
+    """两段行动摘要的相似度（0~1），用于观察层重复内容折叠。"""
+    if not a or not b:
+        return 0.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
 
 # 各行为体允许的行动子集；越权或非法值降级为 maintain
 AGENT_ALLOWED_ACTIONS: dict[int, set[str]] = {
@@ -267,10 +280,21 @@ class SimulationEngine:
             self._inject_seed_events(feed, round_index)
             active_agents = self._select_active_agents(agents, round_index)
 
+            # 知识检索在引擎线程串行完成：sqlite 连接不能跨线程使用，
+            # 若放到 ThreadPoolExecutor 的工作线程里检索会抛 ProgrammingError
+            knowledge_contexts = {
+                agent.id: self._retrieve_knowledge_context(agent, ws)
+                for agent in active_agents
+            }
+
             turns: list[AgentTurn] = []
             with ThreadPoolExecutor(max_workers=len(active_agents)) as executor:
                 future_to_agent = {
-                    executor.submit(self._generate_agent_turn, agent, ws, feed, agents): agent
+                    executor.submit(
+                        self._generate_agent_turn,
+                        agent, ws, feed, agents,
+                        knowledge_contexts.get(agent.id, "none"),
+                    ): agent
                     for agent in active_agents
                 }
                 try:
@@ -493,9 +517,14 @@ class SimulationEngine:
         state: WorldState,
         feed: ActionFeed,
         agents: list[Agent],
+        knowledge_context: str | None = None,
     ) -> AgentTurn:
         scenario = self.state.scenario or Scenario()
         observation = self._build_observation(agent, agents, feed, state)
+        own_last = feed.last_entry_for(agent.id)
+        other_agents = "、".join(a.name for a in agents if a.id != agent.id)
+        if knowledge_context is None:
+            knowledge_context = self._retrieve_knowledge_context(agent, state)
         system_prompt = AGENT_RESPONSE_SYSTEM.format(
             agent_profile=agent.profile,
             cycle=state.simulated_hour,
@@ -508,6 +537,8 @@ class SimulationEngine:
             capacity=agent.capacity,
             recent_events=self._format_recent_events(state),
             observation=observation,
+            other_agents=other_agents,
+            own_last_speech=own_last.content if own_last else "（首轮，暂无上轮发言）",
         )
         user_message = "\n".join(
             [
@@ -521,11 +552,13 @@ class SimulationEngine:
                 "relevant_nodes:",
                 self._format_nodes_summary(state=state, agent=agent, relevant_only=True),
                 "knowledge_context:",
-                self._retrieve_knowledge_context(agent, state),
+                knowledge_context,
                 "Return JSON only.",
             ]
         )
-        data = self._ensure_llm_client().chat_json(system_prompt, user_message, temperature=0.35)
+        data = self._ensure_llm_client().chat_json(
+            system_prompt, user_message, temperature=app_config.llm.decision_temperature
+        )
         required_fields = {
             "inventory_change",
             "cost_change",
@@ -549,7 +582,11 @@ class SimulationEngine:
         if action_type not in ACTION_TYPES or action_type not in allowed_actions:
             warning = f"action_type={action_type} 非法或超出角色行动空间，已降级为 maintain"
             action_type = "maintain"
-        reaction_to = str(data.get("reaction_to", "none")).strip() or "none"
+        reaction_to, reaction_warning = self._validate_reaction_to(
+            data.get("reaction_to"), agent, agents
+        )
+        if reaction_warning:
+            warning = f"{warning}；{reaction_warning}" if warning else reaction_warning
         return AgentTurn(
             agent_id=agent.id,
             agent_name=agent.name,
@@ -569,6 +606,28 @@ class SimulationEngine:
             reaction_to=reaction_to,
             warning=warning,
         )
+
+    @staticmethod
+    def _validate_reaction_to(
+        value: Any, agent: Agent, agents: list[Agent]
+    ) -> tuple[str, str]:
+        """reaction_to 只能是其他行为体名称之一或 none。
+
+        模型常返回多目标（、/|/，分隔）、场景节点名或「世界事件」，
+        多目标取首个精确匹配的合法行为体，其余一律降级为 none 并记 warning，
+        防止脏值经信息流逐轮放大。
+        """
+        raw = str(value or "none").strip() or "none"
+        if raw == "none":
+            return "none", ""
+        valid = {a.name for a in agents if a.id != agent.id}
+        if raw in valid:
+            return raw, ""
+        for part in re.split(r"[、|,，/]+", raw):
+            part = part.strip()
+            if part in valid:
+                return part, f"reaction_to={raw} 含多个对象，已取首个合法行为体「{part}」"
+        return "none", f"reaction_to={raw[:40]} 非合法行为体名称，已降级为 none"
 
     def _build_next_state(
         self,
@@ -686,11 +745,16 @@ class SimulationEngine:
             agent.decision_stance = turn.decision_shift.replace("toward_", "")
 
     def _select_active_agents(self, agents: list[Agent], cycle: int) -> list[Agent]:
-        """根据活跃周期与激活概率选择本轮参与的行为体。"""
-        candidates = [
-            agent for agent in agents
-            if cycle in set(agent.active_cycles or range(1, 13))
-        ]
+        """根据活跃周期与激活概率选择本轮参与的行为体。
+
+        模板的 active_cycles 只排程前 N 轮；仿真轮次超出该范围时
+        （如 max_rounds > 12）行为体保持候选，避免后半程只剩保底激活。
+        """
+        candidates = []
+        for agent in agents:
+            cycles = agent.active_cycles
+            if not cycles or cycle in cycles or cycle > max(cycles):
+                candidates.append(agent)
         active: list[Agent] = []
         for agent in candidates:
             if self._rng.random() <= agent.activity:
@@ -701,17 +765,35 @@ class SimulationEngine:
         return active
 
     def _build_observation(self, agent: Agent, agents: list[Agent], feed: ActionFeed, state: WorldState) -> str:
-        """构建行为体的个性化观察：供应链邻居行动 + 全链高影响力行动。"""
+        """构建行为体的个性化观察：供应链邻居行动 + 全链高影响力行动。
+
+        同一行为体相邻轮次内容高度相似时折叠旧条目为「持续中」，
+        避免模型照抄重复表述（发言同质化的主要诱因）。
+        """
         node_states = state.node_states or self._initial_node_states()
         type_downstream = self._type_level_links(node_states)
         relations = self._neighbor_relations(agent, agents, type_downstream)
         records = feed.for_agent(agent.id, set(relations))
         if not records:
             return "暂无可观察行动（首轮或近期其他行为体未行动）"
-        return "\n".join(
-            record.format_entry(relation=relations.get(record.agent_id, "全链广播"))
-            for record in records
-        )
+        lines: list[str] = []
+        seen_content: dict[int, str] = {}
+        for record in records:
+            relation = relations.get(record.agent_id, "全链广播")
+            previous = seen_content.get(record.agent_id)
+            if (
+                previous is not None
+                and record.action_type != "seed"
+                and _text_similarity(previous, record.content) >= OBS_COLLAPSE_SIMILARITY
+            ):
+                lines.append(
+                    f"- {record.agent_name}（{relation}·{record.role}）"
+                    f"【{record.action_type}】延续上轮相同行动，内容无显著变化（持续中）"
+                )
+                continue
+            seen_content[record.agent_id] = record.content
+            lines.append(record.format_entry(relation=relation))
+        return "\n".join(lines)
 
     def _type_level_links(self, node_states: list[NodeState]) -> dict[str, set[str]]:
         """节点类型级的下游关系：{上游类型: {下游类型}}。无节点链路时用兜底主链。"""
