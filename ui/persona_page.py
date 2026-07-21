@@ -14,6 +14,9 @@ from config import app_config
 from core.agent import AGENT_TEMPLATES
 from core.agent_factory import AgentFactory
 from db.models import ProjectRepository
+from llm.analysis import generate_agent_config
+from llm.config import build_llm_client
+from ui.ai_worker import run_ai_task
 from ui.styles import *
 from ui.widgets import (
     Caption,
@@ -65,7 +68,13 @@ class PersonaPage(QWidget):
         self._il.setSpacing(PAD_SM)
 
         card = Card()
-        card.add(Title("行为体性格配置", 14))
+        header = QHBoxLayout()
+        header.addWidget(Title("行为体性格配置", 14))
+        header.addStretch()
+        self._ai_btn = GhostBtn("AI 生成行为体配置")
+        self._ai_btn.clicked.connect(self._ai_generate)
+        header.addWidget(self._ai_btn)
+        card.add_layout(header)
         card.add(Caption("调整 7 个行为体的决策倾向、活跃度、影响力与角色画像，观察单条供应链的演化"))
         self._il.addWidget(card)
 
@@ -194,8 +203,10 @@ class PersonaPage(QWidget):
         self._pid = pid
         project = ProjectRepository().get_by_id(pid) if pid else None
         scenario = project.scenario if project else {}
-        agents_config = scenario.get("agents_config", {})
+        self._apply_agents_config(scenario.get("agents_config", {}))
+        self._apply_seed_events(scenario.get("seed_events", []))
 
+    def _apply_agents_config(self, agents_config):
         for cd in self._agent_cards:
             cfg = agents_config.get(str(cd["id"]), {})
             tmpl = AgentFactory.get_template(cd["id"])
@@ -205,13 +216,52 @@ class PersonaPage(QWidget):
             cd["influence"].setValue(float(cfg.get("influence", tmpl["influence"])))
             cd["profile"].setPlainText(cfg.get("profile", tmpl["profile"]))
 
+    def _apply_seed_events(self, seed_events):
         while self._seed_rows:
             sr = self._seed_rows.pop()
             self._seed_layout.removeWidget(sr["widget"])
             sr["widget"].deleteLater()
-        for event in scenario.get("seed_events", []):
+        for event in seed_events:
             self._add_seed_row(event)
         self._update_seed_btn()
+
+    # --- AI 生成行为体配置 ---
+
+    def _ai_generate(self):
+        if not self._pid:
+            self.log("请先在 Step1 保存供应链场景", is_error=True)
+            return
+        project = ProjectRepository().get_by_id(self._pid)
+        scenario = project.scenario if project else {}
+        if not scenario.get("background"):
+            self.log("请先在 Step1 填写供应链背景", is_error=True)
+            return
+        client = build_llm_client()
+        if client is None:
+            self.log("未找到可用的 LLM 配置，请到左侧「设置」页填写 API Key", is_error=True)
+            return
+        self._ai_btn.setEnabled(False)
+        self._ai_btn.setText("AI 生成中…")
+        run_ai_task(
+            self,
+            lambda: generate_agent_config(client, scenario),
+            self._on_ai_config,
+            self._on_ai_error,
+        )
+
+    def _reset_ai_btn(self):
+        self._ai_btn.setEnabled(True)
+        self._ai_btn.setText("AI 生成行为体配置")
+
+    def _on_ai_config(self, result):
+        self._reset_ai_btn()
+        self._apply_agents_config(result.get("agents_config", {}))
+        self._apply_seed_events(result.get("seed_events", []))
+        self.log("AI 已生成行为体配置与种子事件，请核对后保存")
+
+    def _on_ai_error(self, err):
+        self._reset_ai_btn()
+        self.log(f"AI 生成失败：{err}", is_error=True)
 
     def reset(self):
         self._pid = None
@@ -232,12 +282,15 @@ class PersonaPage(QWidget):
         }
 
         seed_events = []
+        max_cycle = max(app_config.sim.max_rounds, 1)
         for sr in self._seed_rows:
             content = sr["content"].text().strip()
             if not content:
                 self.log("请填写所有种子事件的内容", is_error=True)
                 return
-            seed_events.append({"content": content, "cycle": sr["cycle"].value()})
+            # 行的周期上限在创建时确定，保存时按当前设置钳制一次
+            cycle = max(1, min(sr["cycle"].value(), max_cycle))
+            seed_events.append({"content": content, "cycle": cycle})
 
         repo = ProjectRepository()
         project = repo.get_by_id(self._pid)

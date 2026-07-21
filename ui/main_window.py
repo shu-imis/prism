@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from ui.styles import stylesheet, SIDEBAR_W
 from ui.home_page import HomePage
 from ui.process_page import ProcessPage
+from ui.settings_page import SettingsPage
 from ui.title_bar import TitleBar
 
 
@@ -66,7 +67,7 @@ class MainWindow(QMainWindow):
         group = QButtonGroup(self)
         group.setExclusive(True)
 
-        for i, label in enumerate(["项目列表", "工作区"]):
+        for i, label in enumerate(["项目列表", "工作区", "设置"]):
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
@@ -82,11 +83,14 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget()
         self._home = HomePage()
         self._process = ProcessPage()
+        self._settings = SettingsPage()
         self._stack.addWidget(self._home)
         self._stack.addWidget(self._process)
+        self._stack.addWidget(self._settings)
 
         self._home.new_project.connect(lambda: (self._process.reset(), self._go(1)))
         self._home.open_project.connect(lambda pid: (self._process.load_project(pid), self._go(1)))
+        self._process.open_settings.connect(lambda: self._go(2))
 
         splitter.addWidget(self._stack)
         splitter.setSizes([SIDEBAR_W, 900])

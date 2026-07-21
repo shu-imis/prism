@@ -1,11 +1,9 @@
 """仿真运行"""
-import os
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QScrollArea,
     QSizePolicy,
     QTextEdit,
@@ -13,7 +11,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import app_config, DB_PATH, ROOT_DIR
+from config import app_config, DB_PATH
 from core.agent_factory import AgentFactory
 from core.scenario_parser import Scenario
 from core.simulation_engine import SimulationEngine, SimulationRecoverableError
@@ -21,11 +19,13 @@ from db.database import Database
 from db.models import (
     MAIN_SIMULATION_NAME,
     CheckpointRepository,
+    KnowledgeRepository,
     ProjectRepository,
     SimulationRepository,
     SimulationRoundRepository,
 )
-from llm.client import LLMClient, LLMProvider, ProviderSettings
+from llm.analysis import analyze_evolution
+from llm.config import active_vendor_label, build_llm_client
 from report.generator import ReportGenerator
 from ui.styles import *
 from ui.text_utils import normalize_speech
@@ -33,36 +33,11 @@ from ui.widgets import (
     Caption,
     Card,
     GhostBtn,
-    Input,
     PrimaryBtn,
     ProgressBar,
     SecondaryBtn,
-    SegmentedControl,
     Title,
 )
-
-PRESETS = [
-    {"label": "OpenAI", "proto": "openai", "url": "https://api.openai.com/v1", "model": "gpt-5.6-sol"},
-    {"label": "Anthropic", "proto": "anthropic", "url": "https://api.anthropic.com", "model": "claude-fable-5"},
-    {"label": "DeepSeek", "proto": "openai", "url": "https://api.deepseek.com/v1", "model": "deepseek-v4-pro"},
-    {"label": "通义千问", "proto": "openai", "url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen3.7-max"},
-    {"label": "Kimi", "proto": "openai", "url": "https://api.moonshot.cn/v1", "model": "kimi-k2.7-code"},
-    {"label": "智谱", "proto": "openai", "url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-5.2"},
-    {"label": "阶跃星辰", "proto": "openai", "url": "https://api.stepfun.com/step_plan/v1", "model": "step-3.7-flash"},
-    {"label": "自定义", "proto": "openai", "url": "", "model": ""},
-]
-
-# 厂商索引 → .env 环境变量前缀
-VENDOR_ENV_PREFIX = {
-    0: "OPENAI",
-    1: "ANTHROPIC",
-    2: "DEEPSEEK",
-    3: "QWEN",
-    4: "KIMI",
-    5: "ZHIPU",
-    6: "STEPFUN",
-    7: "CUSTOM",
-}
 
 
 class SimWorker(QThread):
@@ -75,13 +50,10 @@ class SimWorker(QThread):
     failed = Signal(str)
     recoverable = Signal(str)      # 中断但可恢复
 
-    def __init__(self, pid, proto, key, url, model, rounds):
+    def __init__(self, pid, llm, rounds):
         super().__init__()
         self.pid = pid
-        self.proto = proto
-        self.key = key
-        self.url = url
-        self.model = model
+        self.llm = llm
         self.rounds = rounds
         self._paused = False
         self._cancelled = False
@@ -92,10 +64,16 @@ class SimWorker(QThread):
         self._checkpoint = checkpoint
 
     def pause(self):
+        """暂停（协作式）：引擎在当前轮完成后于下一轮前挂起。"""
         self._paused = True
+        if self._engine is not None:
+            self._engine.pause()
 
     def resume(self):
+        """恢复暂停中的仿真（不重建线程）。"""
         self._paused = False
+        if self._engine is not None:
+            self._engine.resume()
 
     def cancel(self):
         """请求取消（协作式，由主线程调用）。
@@ -111,20 +89,6 @@ class SimWorker(QThread):
     def run(self):
         try:
             db = Database(DB_PATH)
-            if self.proto == "openai":
-                ps = ProviderSettings(
-                    LLMProvider.OPENAI, self.model,
-                    self.key or os.getenv("OPENAI_API_KEY"),
-                    self.url or os.getenv("LLM_BASE_URL"),
-                )
-            else:
-                ps = ProviderSettings(
-                    LLMProvider.ANTHROPIC, self.model,
-                    self.key or os.getenv("ANTHROPIC_API_KEY"),
-                    self.url,
-                )
-
-            llm = LLMClient(providers=[ps], max_retries=1)
             proj = ProjectRepository(db).get_by_id(self.pid)
             scenario_dict = proj.scenario if proj else {}
             sc = Scenario.from_dict(scenario_dict)
@@ -140,7 +104,7 @@ class SimWorker(QThread):
             AgentFactory.apply_overrides(agents, scenario_dict.get("agents_config"))
             seed_events = scenario_dict.get("seed_events", [])
 
-            engine = SimulationEngine(llm)
+            engine = SimulationEngine(self.llm)
             self._engine = engine
             engine.configure(
                 agents, sc,
@@ -150,6 +114,7 @@ class SimWorker(QThread):
                 simulation_record=sim_record,
                 round_repository=round_repo,
                 checkpoint_repository=checkpoint_repo,
+                knowledge_repository=KnowledgeRepository(db) if self.pid else None,
                 resume_checkpoint=self._checkpoint,
             )
             engine.set_progress_callback(
@@ -179,8 +144,14 @@ class SimWorker(QThread):
                 sc.background,
             )
             gen.add_simulation_result(results)
+            report = gen.generate()
+            # Step4 全链路 AI：生成叙述式综合分析；失败则降级为纯公式报告
+            try:
+                report.ai_analysis = analyze_evolution(self.llm, report, results)
+            except Exception:
+                pass
 
-            self.succeeded.emit(gen.generate(), results)
+            self.succeeded.emit(report, results)
         except SimulationRecoverableError as e:
             self.recoverable.emit(str(e))
         except Exception as e:
@@ -199,13 +170,13 @@ class SimWorker(QThread):
 class SimulationPage(QWidget):
     simulation_completed = Signal(object, list)
     state_changed = Signal()  # 仿真运行状态变化（启动/暂停/结束），供工作区状态指示联动
+    open_settings = Signal()  # 请求跳转到全局「设置」页
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pid = None
         self._running = False
         self._worker = None
-        self._vendor_state: dict[int, dict[str, str]] = {}
         self._signals_cleaned = False
         self._build()
 
@@ -225,43 +196,17 @@ class SimulationPage(QWidget):
         il.setContentsMargins(0, 0, 0, 0)
         il.setSpacing(PAD_SM)
 
-        # --- LLM 配置 ---
+        # --- 当前 AI 配置（在「设置」页统一管理） ---
         cfg = Card()
-        cfg.add(Title("LLM 配置", 13))
-
-        self._provider_index = 0
-        self._provider_seg = SegmentedControl(
-            [(str(i), p["label"]) for i, p in enumerate(PRESETS)]
-        )
-        self._provider_seg.set_value("0")
-        self._provider_seg.valueChanged.connect(
-            lambda v: self._on_provider_changed(int(v))
-        )
-        cfg.add(self._provider_seg)
-
-        self._key = Input("API Key")
-        self._key.setEchoMode(QLineEdit.Password)
-        self._url = Input("Base URL")
-        self._model = Input()
-        self._model.setText(app_config.llm.default_model)
-
-        self._config_widget = QWidget()
-        cv = self._config_widget
-        cl = QVBoxLayout(cv)
-        cl.setContentsMargins(0, 0, 0, 0)
-        cl.addWidget(QLabel("API Key"))
-        cl.addWidget(self._key)
-        cl.addWidget(QLabel("Base URL"))
-        cl.addWidget(self._url)
-        cl.addWidget(QLabel("模型"))
-        cl.addWidget(self._model)
-        cfg.add(cv)
-
-        self._toggle_btn = GhostBtn("展开 ▼")
-        self._toggle_btn.clicked.connect(self._toggle_config)
-        cfg.add(self._toggle_btn)
-        # 默认收起 API Key/URL/模型字段，首屏留给指标与日志
-        self._config_widget.setVisible(False)
+        cfg_header = QHBoxLayout()
+        cfg_header.addWidget(Title("AI 配置", 13))
+        cfg_header.addStretch()
+        go_btn = GhostBtn("前往设置 →")
+        go_btn.clicked.connect(self.open_settings.emit)
+        cfg_header.addWidget(go_btn)
+        cfg.add_layout(cfg_header)
+        self._llm_caption = Caption("")
+        cfg.add(self._llm_caption)
         il.addWidget(cfg)
 
         # --- 指标卡 ---
@@ -310,71 +255,20 @@ class SimulationPage(QWidget):
         scroll.setWidget(inner)
         layout.addWidget(scroll)
 
-        # 从 .env 预填各厂商配置
-        self._load_vendor_state_from_env()
+        self._refresh_llm_caption()
 
-    def _load_vendor_state_from_env(self):
-        """从 .env 加载各厂商已保存的配置，并预填当前选中厂商。"""
-        for idx, prefix in VENDOR_ENV_PREFIX.items():
-            key = os.getenv(f"{prefix}_API_KEY", "")
-            url = os.getenv(f"{prefix}_BASE_URL", "")
-            model = os.getenv(f"{prefix}_MODEL", "")
-            preset = PRESETS[idx]
-            if key or url or model:
-                self._vendor_state[idx] = {
-                    "key": key,
-                    "url": url or preset.get("url", ""),
-                    "model": model or preset.get("model", ""),
-                }
-        # 预填默认厂商（OpenAI，index 0）
-        self._apply_vendor_state(0)
+    def showEvent(self, event):
+        # 设置页可能刚改过配置，每次进入刷新展示
+        self._refresh_llm_caption()
+        super().showEvent(event)
 
-    def _apply_vendor_state(self, index: int):
-        """将指定厂商的状态填入 UI 控件。"""
-        if index in self._vendor_state:
-            state = self._vendor_state[index]
-            self._key.setText(state.get("key", ""))
-            self._url.setText(state.get("url", ""))
-            self._model.setText(state.get("model", ""))
+    def _refresh_llm_caption(self):
+        if build_llm_client(max_retries=1) is None:
+            self._llm_caption.setText(
+                "尚未配置 LLM API Key，请到左侧「设置」页完成配置后再启动仿真"
+            )
         else:
-            p = PRESETS[index]
-            self._key.setText("")
-            self._url.setText(p.get("url", ""))
-            self._model.setText(p.get("model", ""))
-
-    def _save_current_vendor_state(self):
-        """将当前 UI 输入保存到当前厂商的状态中。"""
-        self._vendor_state[self._provider_index] = {
-            "key": self._key.text(),
-            "url": self._url.text(),
-            "model": self._model.text(),
-        }
-
-    def _persist_to_env(self):
-        """将所有厂商状态写入 .env 文件持久化。"""
-        self._save_current_vendor_state()
-        env_path = ROOT_DIR / ".env"
-        try:
-            from dotenv import set_key as dotenv_set_key
-        except ImportError:
-            return
-        env_path_str = str(env_path)
-        for idx, state in self._vendor_state.items():
-            if idx not in VENDOR_ENV_PREFIX:
-                continue
-            prefix = VENDOR_ENV_PREFIX[idx]
-            for field, suffix in [("key", "API_KEY"), ("url", "BASE_URL"), ("model", "MODEL")]:
-                try:
-                    dotenv_set_key(env_path_str, f"{prefix}_{suffix}", state.get(field, ""))
-                except Exception:
-                    pass
-
-    def _on_provider_changed(self, index: int):
-        if index == self._provider_index:
-            return
-        self._save_current_vendor_state()
-        self._provider_index = index
-        self._apply_vendor_state(index)
+            self._llm_caption.setText(f"当前 AI 配置：{active_vendor_label()}（在「设置」页修改）")
 
     def log(self, text: str, is_error: bool = False):
         """向日志区追加一行，错误信息以红色显示。"""
@@ -382,12 +276,6 @@ class SimulationPage(QWidget):
             self._log.append(f"<span style='color:#CC3333'>{text}</span>")
         else:
             self._log.append(text)
-
-    def _toggle_config(self):
-        cv = self._config_widget
-        visible = not cv.isVisible()
-        cv.setVisible(visible)
-        self._toggle_btn.setText("收起 ▲" if visible else "展开 ▼")
 
     def load_project(self, pid):
         self._pid = pid
@@ -453,20 +341,26 @@ class SimulationPage(QWidget):
             self.state_changed.emit()
             return
 
+        # 暂停中的 worker 直接恢复，不重建线程、不作废进行中的轮次
+        if self._worker is not None and self._worker._paused and self._worker.isRunning():
+            self._worker.resume()
+            self._running = True
+            self._start.setText("⏸ 暂停")
+            self.state_changed.emit()
+            return
+
         # 替换旧 worker 前必须等其线程真正结束，否则对运行中的 QThread
         # 调用 disconnect/deleteLater 会触发 use-after-free 崩溃。
         self._dispose_worker()
 
-        # 持久化当前厂商及所有厂商配置到 .env
-        self._persist_to_env()
+        llm = build_llm_client(max_retries=1)
+        if llm is None:
+            self.log("未找到可用的 LLM 配置，请到左侧「设置」页填写 API Key", is_error=True)
+            return
 
-        p = PRESETS[self._provider_index]
         self._worker = SimWorker(
             self._pid,
-            p.get("proto", "openai"),
-            self._key.text(),
-            self._url.text(),
-            self._model.text(),
+            llm,
             app_config.sim.max_rounds,
         )
         if self._pid:
@@ -668,6 +562,7 @@ class SimulationPage(QWidget):
         self._running = False
         self._bar.setValue(0)
         self._st.setText("")
+        self._st.setVisible(False)
         self._log.clear()
         self._start.setText("▶ 启动仿真")
         self._start.setEnabled(True)

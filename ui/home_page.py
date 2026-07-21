@@ -50,7 +50,6 @@ class HomePage(QWidget):
         scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
 
         self._inner = QWidget()
-        self._inner.setStyleSheet("background: transparent;")
         self._grid = QGridLayout(self._inner)
         self._grid.setContentsMargins(PAD_XL, 0, PAD_XL, 0)
         self._grid.setSpacing(PAD_MD)
@@ -81,7 +80,6 @@ class HomePage(QWidget):
         self._grid.setRowStretch(0, 0)
         for i, proj in enumerate(projects):
             btn = QPushButton()
-            btn.setObjectName("")
             btn.setStyleSheet(
                 f"QPushButton {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; border-radius: {RADIUS}px; }}"
                 f"QPushButton:hover {{ border-color: {TEXT_PRIMARY}; }}"

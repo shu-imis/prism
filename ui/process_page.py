@@ -1,4 +1,5 @@
 """工作区"""
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -27,6 +28,8 @@ from report.exporter import ReportExporter
 
 
 class ProcessPage(QWidget):
+    open_settings = Signal()  # 转发仿真页的「前往设置」请求
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pid = None
@@ -110,12 +113,13 @@ class ProcessPage(QWidget):
 
         # --- 日志终端 ---
         self._log = QPlainTextEdit()
+        self._log.setObjectName("terminalLog")
         self._log.setReadOnly(True)
         self._log.setFixedHeight(120)
         self._log.setFrameShape(QFrame.NoFrame)
         self._log.setStyleSheet(
             "QPlainTextEdit{"
-            f"background:{TEXT_PRIMARY};color:#AAA;"
+            f"background:{BG_TERMINAL};color:#AAA;"
             "font-family:'JetBrains Mono','Noto Sans SC';font-size:11px;"
             "border:none;padding:6px 10px;"
             "}"
@@ -130,6 +134,7 @@ class ProcessPage(QWidget):
         self._sp.agents_saved.connect(self._on_saved)
         self._smp.simulation_completed.connect(self._on_done)
         self._smp.state_changed.connect(self._update)
+        self._smp.open_settings.connect(self.open_settings.emit)
         # 将终端日志接口传给各页面
         self._ep.log = self._log_msg
         self._sp.log = self._log_msg
@@ -148,7 +153,7 @@ class ProcessPage(QWidget):
     def _on_done(self, r, res):
         self._p("仿真已完成")
         self._update()
-        self._rp.set_report(r, res)
+        self._rp.set_report(r, res, project_id=self._pid)
         # 持久化报告（主线程）；仿真轮次已由引擎自行落库
         if self._pid:
             try:
@@ -158,7 +163,7 @@ class ProcessPage(QWidget):
                         self._pid, dict(project.scenario), status="completed"
                     )
                 md = ReportExporter.to_markdown(r, res)
-                ReportRepository().save(
+                ReportRepository().save_or_update_latest(
                     project_id=self._pid,
                     title=f"{r.project_name} - 供应链演化仿真报告",
                     markdown=md,
@@ -312,4 +317,5 @@ class ProcessPage(QWidget):
         self._ep.reset_for_new_project()
         self._sp.reset()
         self._smp.reset_for_new_project()
+        self._rp.reset()
         self._p("工作区已就绪")

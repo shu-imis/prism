@@ -1,5 +1,7 @@
 """供应链搭建"""
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -20,12 +22,16 @@ from core.document_importer import (
     import_documents,
 )
 from db.models import KnowledgeRepository, ProjectRepository
+from llm.analysis import extract_scenario_from_docs
+from llm.config import build_llm_client
+from ui.ai_worker import run_ai_task
 from ui.styles import *
 from ui.widgets import (
     Caption,
     Card,
     DangerBtn,
     DecimalInput,
+    Divider,
     GhostBtn,
     Input,
     NumberInput,
@@ -261,9 +267,25 @@ class EventPage(QWidget):
             f"可导入PDF/Word/Markdown/TXT，最多{MAX_IMPORT_FILES}个文件，"
             f"{MAX_IMPORT_TOTAL_CHARS}字"
         ))
+        btn_row = QHBoxLayout()
         import_btn = SecondaryBtn("导入背景文档")
         import_btn.clicked.connect(self._import_docs)
-        card.add(import_btn)
+        btn_row.addWidget(import_btn)
+        self._ai_btn = GhostBtn("AI 分析并自动填写")
+        self._ai_btn.clicked.connect(self._ai_fill)
+        btn_row.addWidget(self._ai_btn)
+        btn_row.addStretch()
+        card.add_layout(btn_row)
+
+        # 已导入文档清单（导入前为空，不占视觉空间）
+        self._docs_layout = QVBoxLayout()
+        self._docs_layout.setSpacing(PAD_XS)
+        card.add_layout(self._docs_layout)
+
+        # 已入库的知识库分块（保存文档时写入，供仿真 RAG 检索）
+        self._kb_layout = QVBoxLayout()
+        self._kb_layout.setSpacing(PAD_XS)
+        card.add_layout(self._kb_layout)
 
         inner_layout.addWidget(card)
 
@@ -312,6 +334,10 @@ class EventPage(QWidget):
         if not p:
             return
         self._pid = p.id
+        # 清空上个项目残留的导入文档，避免误存进当前项目
+        self._imported = []
+        self._render_imported_docs()
+        self._render_knowledge_base()
         s = p.scenario
         self._title.setText(s.get("title", ""))
         self._industry.setText(s.get("industry", ""))
@@ -324,6 +350,8 @@ class EventPage(QWidget):
     def reset_for_new_project(self):
         self._pid = None
         self._imported = []
+        self._render_imported_docs()
+        self._render_knowledge_base()
         self._title.clear()
         self._bg.clear()
         self._node_editor.set_nodes(DEFAULT_NODES)
@@ -338,12 +366,135 @@ class EventPage(QWidget):
         if files:
             try:
                 self._imported = import_documents(files)
-                self._save_btn.setText(
-                    f"已导入 {len(self._imported)} 个文档，保存并继续 →"
-                )
+                self._render_imported_docs()
+                self.log(f"已导入 {len(self._imported)} 个文档")
             except Exception as e:
                 self.log(f"导入失败：{e}", is_error=True)
                 return
+
+    @staticmethod
+    def _clear_layout(layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                EventPage._clear_layout(item.layout())
+
+    def _render_imported_docs(self):
+        """把已导入文档渲染成可见清单（文件名 + 字数 + 清除入口）。"""
+        self._clear_layout(self._docs_layout)
+
+        if not self._imported:
+            return
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.addWidget(Caption(f"已导入 {len(self._imported)} 个文档："))
+        clear_btn = GhostBtn("清除")
+        clear_btn.clicked.connect(self._clear_imported_docs)
+        header.addWidget(clear_btn)
+        header.addStretch()
+        self._docs_layout.addLayout(header)
+
+        for doc in self._imported:
+            name = Path(doc.path).name
+            row = QLabel(f"{name}（{len(doc.text)} 字）")
+            row.setStyleSheet(f"font-size:12px;color:{TEXT_SECONDARY};")
+            self._docs_layout.addWidget(row)
+
+    def _clear_imported_docs(self):
+        self._imported = []
+        self._render_imported_docs()
+        self.log("已清除导入的文档")
+
+    # --- 知识库（已入库分块） ---
+
+    def _render_knowledge_base(self):
+        """展示当前项目已入库的知识分块（按来源文档聚合），支持清空。"""
+        self._clear_layout(self._kb_layout)
+        if not self._pid:
+            return
+        chunks = KnowledgeRepository().list_by_project(self._pid)
+        if not chunks:
+            return
+
+        by_source: dict[str, list] = {}
+        for chunk in chunks:
+            by_source.setdefault(chunk.source, []).append(chunk)
+
+        self._kb_layout.addWidget(Divider())
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        # 不用 Caption（自动换行会折成多行）：标题保持单行
+        title = QLabel(
+            f"知识库（供仿真检索）：{len(by_source)} 个文档 · {len(chunks)} 个分块"
+        )
+        title.setStyleSheet(f"font-size:11px;color:{TEXT_MUTED};")
+        header.addWidget(title)
+        clear_btn = GhostBtn("清空知识库")
+        clear_btn.clicked.connect(self._clear_knowledge_base)
+        header.addWidget(clear_btn)
+        header.addStretch()
+        self._kb_layout.addLayout(header)
+
+        for source, items in by_source.items():
+            total_chars = sum(len(item.content) for item in items)
+            row = QLabel(f"{Path(source).name}（{len(items)} 块 · {total_chars} 字）")
+            row.setStyleSheet(f"font-size:12px;color:{TEXT_SECONDARY};")
+            self._kb_layout.addWidget(row)
+
+    def _clear_knowledge_base(self):
+        if not self._pid:
+            return
+        KnowledgeRepository().replace_for_project(self._pid, [])
+        self._render_knowledge_base()
+        self.log("已清空项目知识库")
+
+    # --- AI 分析文档并自动填写 ---
+
+    def _ai_fill(self):
+        docs_text = "\n\n".join(d.text for d in self._imported).strip()
+        if not docs_text:
+            docs_text = self._bg.toPlainText().strip()
+        if not docs_text:
+            self.log("请先导入文档或填写供应链背景", is_error=True)
+            return
+        client = build_llm_client()
+        if client is None:
+            self.log("未找到可用的 LLM 配置，请到左侧「设置」页填写 API Key", is_error=True)
+            return
+        self._ai_btn.setEnabled(False)
+        self._ai_btn.setText("AI 分析中…")
+        run_ai_task(
+            self,
+            lambda: extract_scenario_from_docs(client, docs_text),
+            self._on_ai_scenario,
+            self._on_ai_error,
+        )
+
+    def _reset_ai_btn(self):
+        self._ai_btn.setEnabled(True)
+        self._ai_btn.setText("AI 分析并自动填写")
+
+    def _on_ai_scenario(self, sc):
+        self._reset_ai_btn()
+        if sc.get("title"):
+            self._title.setText(sc["title"])
+        if sc.get("industry"):
+            self._industry.setText(sc["industry"])
+        if sc.get("background"):
+            self._bg.setPlainText(sc["background"])
+        self._inv.setValue(sc.get("initial_inventory", 75))
+        self._cost.setValue(sc.get("baseline_cost", 50))
+        self._svc.setValue(sc.get("baseline_service_level", 0.85))
+        if sc.get("nodes"):
+            self._node_editor.set_nodes(sc["nodes"])
+        self.log("AI 已完成文档分析并自动填写，请核对后保存")
+
+    def _on_ai_error(self, err):
+        self._reset_ai_btn()
+        self.log(f"AI 分析失败：{err}", is_error=True)
 
     def _save(self):
         t = self._title.text().strip()
@@ -390,5 +541,6 @@ class EventPage(QWidget):
                     for i, c in enumerate(chunk_text(d.text))
                 ],
             )
+        self._render_knowledge_base()
 
         self.project_saved.emit(pid)
