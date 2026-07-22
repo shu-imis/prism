@@ -129,4 +129,4 @@ prism/
 
 ## 许可
 
-内部项目。
+MIT License — 详见 [LICENSE](LICENSE)
