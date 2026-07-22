@@ -44,19 +44,24 @@ class HomePage(QWidget):
         hdr.addWidget(new_btn)
         layout.addLayout(hdr)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QScrollArea.NoFrame)
 
         self._inner = QWidget()
         self._grid = QGridLayout(self._inner)
         self._grid.setContentsMargins(PAD_XL, 0, PAD_XL, 0)
         self._grid.setSpacing(PAD_MD)
         self._grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        scroll.setWidget(self._inner)
-        layout.addWidget(scroll, 1)
+        self._scroll.setWidget(self._inner)
+        layout.addWidget(self._scroll, 1)
+        self._current_cols = 1
         self.refresh()
+
+    def _columns(self) -> int:
+        """根据滚动区宽度动态计算列数（每列至少 240px + 间距）。"""
+        vw = self._scroll.viewport().width() - 2 * PAD_XL
+        return max(1, vw // (240 + PAD_MD))
 
     def refresh(self):
         while self._grid.count():
@@ -65,17 +70,19 @@ class HomePage(QWidget):
                 item.widget().deleteLater()
 
         projects = self._repo.list_all()
+        cols = self._columns()
+
         if not projects:
             empty = QLabel("暂无项目\n点击「＋ 新建项目」创建")
             empty.setAlignment(Qt.AlignCenter)
             empty.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 14px; padding: 40px;")
-            for col in range(3):
+            for col in range(cols):
                 self._grid.setColumnStretch(col, 1)
             self._grid.setRowStretch(0, 1)
-            self._grid.addWidget(empty, 0, 0, 1, 3, Qt.AlignCenter)
+            self._grid.addWidget(empty, 0, 0, 1, cols, Qt.AlignCenter)
             return
 
-        for col in range(3):
+        for col in range(cols):
             self._grid.setColumnStretch(col, 0)
         self._grid.setRowStretch(0, 0)
         for i, proj in enumerate(projects):
@@ -116,15 +123,26 @@ class HomePage(QWidget):
             date_str = (proj.created_at or "")[:10]
             card_layout.addWidget(Caption(date_str))
 
-            self._grid.addWidget(btn, i // 3, i % 3)
+            self._grid.addWidget(btn, i // cols, i % cols)
+
+    def resizeEvent(self, event):
+        """窗口宽度变化时重新计算列数并刷新布局。"""
+        super().resizeEvent(event)
+        if hasattr(self, '_grid') and hasattr(self, '_scroll'):
+            new_cols = self._columns()
+            # 只有列数真正变化时才刷新，避免每次 resize 都重建
+            if new_cols != self._current_cols:
+                self._current_cols = new_cols
+                self.refresh()
 
     def showEvent(self, event):
         super().showEvent(event)
+        self._current_cols = self._columns()
         self.refresh()
 
     def _on_context_menu(self, btn, pos, pid):
         menu = QMenu()
-        menu.setStyleSheet(f"QMenu{{background:{BG_SURFACE};border:1px solid {BORDER};padding:4px;}} QMenu::item{{padding:6px 12px;color:{TEXT_PRIMARY};}} QMenu::item:selected{{background:{TEXT_PRIMARY};color:{TEXT_ON_DARK};}}")
+        menu.setStyleSheet(f"QMenu{{background:{BG_SURFACE};border:1px solid {BORDER};border-radius:0px;padding:4px;}} QMenu::item{{padding:6px 12px;color:{TEXT_PRIMARY};}} QMenu::item:selected{{background:{TEXT_PRIMARY};color:{TEXT_ON_DARK};}}")
         delete_action = menu.addAction("删除")
         action = menu.exec(btn.mapToGlobal(pos))
         if action == delete_action:

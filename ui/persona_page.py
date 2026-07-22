@@ -58,13 +58,10 @@ class PersonaPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setStyleSheet(
-            "QScrollArea{background:transparent;border:none;padding:0;margin:0;}"
-        )
 
         inner = QWidget()
         self._il = QVBoxLayout(inner)
-        self._il.setContentsMargins(0, 0, 0, 0)
+        self._il.setContentsMargins(0, 0, PAD_XL, 0)
         self._il.setSpacing(PAD_SM)
 
         card = Card()

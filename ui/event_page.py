@@ -114,6 +114,21 @@ class NodeEditor(QWidget):
                 lambda e, v=val, s=selected_type, ws=node_type_widgets:
                 _select_type(v, s, ws)
             )
+            # 悬停态，与 SegmentedControl 的 QPushButton:hover 一致
+            def _make_enter(l=val, s=selected_type, w=lbl):
+                if s["val"] != l:
+                    w.setStyleSheet(
+                        f"background:{BG_HOVER};color:{TEXT_PRIMARY};"
+                        "border:1px solid " + BORDER + ";padding:2px 9px;font-size:12px;"
+                    )
+            def _make_leave(l=val, s=selected_type, w=lbl):
+                if s["val"] != l:
+                    w.setStyleSheet(
+                        f"background:transparent;color:{TEXT_MUTED};"
+                        f"border:1px solid {BORDER};padding:2px 9px;font-size:12px;"
+                    )
+            lbl.enterEvent = lambda e, fn=_make_enter: fn()
+            lbl.leaveEvent = lambda e, fn=_make_leave: fn()
             node_type_widgets.append((val, lbl))
             row1.addWidget(lbl)
         row1.addStretch()
@@ -124,12 +139,14 @@ class NodeEditor(QWidget):
                 if tv == v:
                     w.setStyleSheet(
                         f"background:{TEXT_PRIMARY};color:{TEXT_ON_DARK};"
-                        "padding:2px 10px;font-size:12px;"
+                        "border:1px solid " + TEXT_PRIMARY + ";font-weight:600;"
+                        "padding:2px 9px;font-size:12px;"
                     )
                 else:
                     w.setStyleSheet(
                         f"background:transparent;color:{TEXT_MUTED};"
-                        "padding:2px 10px;font-size:12px;"
+                        f"border:1px solid {BORDER};"
+                        "padding:2px 9px;font-size:12px;"
                     )
         _select_type(type_val, selected_type, node_type_widgets)
 
@@ -237,13 +254,10 @@ class EventPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setStyleSheet(
-            "QScrollArea{background:transparent;border:none;padding:0;margin:0;}"
-        )
 
         inner = QWidget()
         inner_layout = QVBoxLayout(inner)
-        inner_layout.setContentsMargins(0, 0, 0, 0)
+        inner_layout.setContentsMargins(0, 0, PAD_XL, 0)
         inner_layout.setSpacing(PAD_SM)
 
         card = Card()
@@ -399,9 +413,7 @@ class EventPage(QWidget):
 
         for doc in self._imported:
             name = Path(doc.path).name
-            row = QLabel(f"{name}（{len(doc.text)} 字）")
-            row.setStyleSheet(f"font-size:12px;color:{TEXT_SECONDARY};")
-            self._docs_layout.addWidget(row)
+            self._docs_layout.addWidget(Caption(f"{name}（{len(doc.text)} 字）"))
 
     def _clear_imported_docs(self):
         self._imported = []
@@ -440,9 +452,7 @@ class EventPage(QWidget):
 
         for source, items in by_source.items():
             total_chars = sum(len(item.content) for item in items)
-            row = QLabel(f"{Path(source).name}（{len(items)} 块 · {total_chars} 字）")
-            row.setStyleSheet(f"font-size:12px;color:{TEXT_SECONDARY};")
-            self._kb_layout.addWidget(row)
+            self._kb_layout.addWidget(Caption(f"{Path(source).name}（{len(items)} 块 · {total_chars} 字）"))
 
     def _clear_knowledge_base(self):
         if not self._pid:

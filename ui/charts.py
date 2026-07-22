@@ -297,7 +297,6 @@ class SwimlaneGrid(QWidget):
                 cell = QLabel("")
                 cell.setFixedHeight(_CELL_H)
                 cell.setMinimumWidth(24)
-                cell.setMaximumWidth(56)
                 cell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 action = snapshot.action_type if snapshot else ""
                 summary = (

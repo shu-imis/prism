@@ -78,7 +78,7 @@ class ProcessPage(QWidget):
 
         # --- 主体 ---
         body = QVBoxLayout()
-        body.setContentsMargins(PAD_XL, PAD_XL, PAD_XL, 0)
+        body.setContentsMargins(PAD_XL, PAD_XL, 0, 0)
         body.setSpacing(0)
 
         self._stack = QStackedWidget()
@@ -121,9 +121,11 @@ class ProcessPage(QWidget):
             "QPlainTextEdit{"
             f"background:{BG_TERMINAL};color:#AAA;"
             "font-family:'JetBrains Mono','Noto Sans SC';font-size:11px;"
-            "border:none;padding:6px 10px;"
+            "border:none;padding:0px;"
             "}"
         )
+        # 滚动条贴控件右边框（padding=0），文本间距由 viewport margins 控制
+        self._log.setViewportMargins(10, 6, 10, 6)
         layout.addWidget(self._log)
 
         self._p("工作区已就绪")

@@ -187,13 +187,10 @@ class SimulationPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setStyleSheet(
-            "QScrollArea{background:transparent;border:none;padding:0;margin:0;}"
-        )
 
         inner = QWidget()
         il = QVBoxLayout(inner)
-        il.setContentsMargins(0, 0, 0, 0)
+        il.setContentsMargins(0, 0, PAD_XL, 0)
         il.setSpacing(PAD_SM)
 
         # --- 当前 AI 配置（在「设置」页统一管理） ---
@@ -238,8 +235,11 @@ class SimulationPage(QWidget):
         self._log.setReadOnly(True)
         self._log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._log.setStyleSheet(
-            f"QTextEdit{{background:{BG_INPUT};border:1px solid {BORDER};font-size:12px;}}"
+            f"QTextEdit{{background:{BG_INPUT};border:1px solid {BORDER};font-size:12px;"
+            f"padding:0px;}}"
         )
+        # 滚动条贴控件右边框（padding=0），文本左右间距由 viewport margins 对称控制
+        self._log.setViewportMargins(8, 5, 8, 5)
         il.addWidget(self._log, 1)
 
         br = QHBoxLayout()

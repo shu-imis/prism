@@ -86,15 +86,12 @@ def _scrollbar_qss(bg: str, scope: str = "") -> str:
     return f"""
 {p}QScrollBar:vertical {{
     background: transparent;
-    width: 10px;
-    margin: 3px 2px 3px 0;
+    width: 8px;
+    margin: 0;
 }}
 {p}QScrollBar::handle:vertical {{
-    background: {rgba(normal)};
-    border: 2px solid transparent;
-    background-clip: padding-box;
-    border-radius: 4px;
-    min-height: 32px;
+    background: {rgba(normal)}; border-radius: 0px;
+    min-height: 20px;
 }}
 {p}QScrollBar::handle:vertical:hover {{ background: {rgba(hover)}; }}
 {p}QScrollBar::handle:vertical:pressed {{ background: {rgba(pressed)}; }}
@@ -102,15 +99,12 @@ def _scrollbar_qss(bg: str, scope: str = "") -> str:
 {p}QScrollBar::add-page:vertical, {p}QScrollBar::sub-page:vertical {{ background: transparent; }}
 {p}QScrollBar:horizontal {{
     background: transparent;
-    height: 10px;
-    margin: 0 2px 2px 3px;
+    height: 8px;
+    margin: 0;
 }}
 {p}QScrollBar::handle:horizontal {{
-    background: {rgba(normal)};
-    border: 2px solid transparent;
-    background-clip: padding-box;
-    border-radius: 4px;
-    min-width: 32px;
+    background: {rgba(normal)}; border-radius: 0px;
+    min-width: 20px;
 }}
 {p}QScrollBar::handle:horizontal:hover {{ background: {rgba(hover)}; }}
 {p}QScrollBar::handle:horizontal:pressed {{ background: {rgba(pressed)}; }}
@@ -124,6 +118,9 @@ def stylesheet() -> str:
 * {{ font-size: 13px; color: {TEXT_PRIMARY}; font-family: 'Space Grotesk', 'Noto Sans SC'; }}
 QWidget {{ background: transparent; }}
 QMainWindow {{ background: {BG_PAGE}; }}
+
+/* ---- 无边框窗口内容区（WA_TranslucentBackground 下取代 QMainWindow 背景） ---- */
+#windowBody {{ background: {BG_PAGE}; }}
 
 /* ---- 侧边栏 ---- */
 #sidebar {{
@@ -238,6 +235,18 @@ QSlider::sub-page:horizontal {{ background: {TEXT_PRIMARY}; border-radius: 0px; 
 /* ---- 滚动条（把手颜色由背景亮度自动推导，见 _scrollbar_qss） ---- */
 {_scrollbar_qss(BG_PAGE)}
 {_scrollbar_qss(BG_TERMINAL, scope="#terminalLog")}
+
+/* ---- ToolTip（替代原生样式，与设计系统一致） ---- */
+QToolTip {{
+    background: {BG_SURFACE};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER};
+    padding: 4px 8px;
+    border-radius: 0px;
+}}
+
+/* ---- 滚动区域（全局统一，消除各页面的重复内联样式） ---- */
+QScrollArea {{ background: transparent; border: none; }}
 
 /* ---- 自定义标题栏 ---- */
 #titleBar {{ background: {BG_PAGE}; }}

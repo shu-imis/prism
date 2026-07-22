@@ -66,7 +66,6 @@ class SettingsPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
 
         inner = QWidget()
         il = QVBoxLayout(inner)

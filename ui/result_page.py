@@ -66,9 +66,6 @@ class ResultPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setStyleSheet(
-            "QScrollArea{background:transparent;border:none;padding:0;margin:0;}"
-        )
 
         inner = QWidget()
         inner_layout = QVBoxLayout(inner)
@@ -119,7 +116,7 @@ class ResultPage(QWidget):
         # --- 2. AI 综合分析（叙事主角） ---
         self._ai_card = Card()
         ai_header = QHBoxLayout()
-        ai_header.addWidget(Title("AI 综合分析", 15))
+        ai_header.addWidget(Title("AI 综合分析", 14))
         ai_header.addStretch()
         self._ai_btn = GhostBtn("生成 AI 分析")
         self._ai_btn.clicked.connect(self._generate_ai_analysis)
@@ -134,9 +131,9 @@ class ResultPage(QWidget):
         chart_card = Card()
         chart_header = QHBoxLayout()
         chart_header.addWidget(Title("指标演化", 14))
-        chart_header.addStretch()
         chart_hint = QLabel("各指标按自身取值范围归一化")
         chart_hint.setStyleSheet(f"font-size:11px;color:{TEXT_MUTED};")
+        chart_header.addStretch()
         chart_header.addWidget(chart_hint)
         chart_card.add_layout(chart_header)
         self._chart = MetricsChart()
@@ -167,9 +164,9 @@ class ResultPage(QWidget):
         swim_card = Card()
         swim_header = QHBoxLayout()
         swim_header.addWidget(Title("演化过程", 14))
-        swim_header.addStretch()
         swim_hint = QLabel("悬停色块查看行动详情；红色周期含关键事件")
         swim_hint.setStyleSheet(f"font-size:11px;color:{TEXT_MUTED};")
+        swim_header.addStretch()
         swim_header.addWidget(swim_hint)
         swim_card.add_layout(swim_header)
         self._swimlane = SwimlaneGrid()

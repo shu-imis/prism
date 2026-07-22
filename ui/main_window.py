@@ -1,9 +1,10 @@
 """Prism 主窗口"""
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QPushButton, QLabel,
-    QStackedWidget, QSplitter, QButtonGroup,
+    QStackedWidget, QHBoxLayout, QButtonGroup, QGraphicsDropShadowEffect,
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from ui.styles import stylesheet, SIDEBAR_W
 from ui.home_page import HomePage
 from ui.process_page import ProcessPage
@@ -28,12 +29,21 @@ class MainWindow(QMainWindow):
         super().changeEvent(event)
 
     def _setup_window(self):
-        # 无边框窗口，自定义标题栏替代
+        # 无边框窗口 + 透明背景，投影由容器自身绘制
         self.setWindowFlag(Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
 
     def _build(self):
+        # ---- 投影包裹层：10px 透明边距供阴影伸展 ----
+        shadow = QWidget(self)
+        self.setCentralWidget(shadow)
+        shadow_layout = QVBoxLayout(shadow)
+        shadow_layout.setContentsMargins(10, 10, 10, 10)
+        shadow_layout.setSpacing(0)
+
         # ---- 整体容器 ----
         container = QWidget()
+        container.setObjectName("windowBody")
         main_layout = QVBoxLayout(container)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -45,12 +55,7 @@ class MainWindow(QMainWindow):
         self._title_bar.closed.connect(self.close)
         main_layout.addWidget(self._title_bar)
 
-        # ---- 分割器（侧边栏 + 内容） ----
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setHandleWidth(1)
-        splitter.setChildrenCollapsible(False)
-
-        # ---- 侧边栏 ----
+        # ---- 侧边栏 + 内容区 ----
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(SIDEBAR_W)
@@ -77,7 +82,6 @@ class MainWindow(QMainWindow):
             sl.addWidget(btn)
 
         sl.addStretch()
-        splitter.addWidget(sidebar)
 
         # ---- 内容区 ----
         self._stack = QStackedWidget()
@@ -92,11 +96,20 @@ class MainWindow(QMainWindow):
         self._home.open_project.connect(lambda pid: (self._process.load_project(pid), self._go(1)))
         self._process.open_settings.connect(lambda: self._go(2))
 
-        splitter.addWidget(self._stack)
-        splitter.setSizes([SIDEBAR_W, 900])
+        body = QHBoxLayout()
+        body.setSpacing(0)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.addWidget(sidebar)
+        body.addWidget(self._stack, 1)
+        main_layout.addLayout(body, 1)
+        shadow_layout.addWidget(container)
 
-        main_layout.addWidget(splitter, 1)
-        self.setCentralWidget(container)
+        # ---- 投影效果（弥散投影，与 QMenu 原生阴影同层次） ----
+        drop_shadow = QGraphicsDropShadowEffect(container)
+        drop_shadow.setBlurRadius(24)
+        drop_shadow.setOffset(0, 4)
+        drop_shadow.setColor(QColor(0, 0, 0, 60))
+        container.setGraphicsEffect(drop_shadow)
 
         self._go(0)
 
