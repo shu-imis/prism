@@ -66,7 +66,7 @@ class LLMClient:
                     provider=provider or LLMProvider.OPENAI,
                     model=model or app_config.llm.default_model,
                     api_key=api_key,
-                    base_url=os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL"),
+                    base_url=os.getenv("OPENAI_BASE_URL"),
                 )
             ]
         self.temperature = app_config.llm.temperature if temperature is None else temperature
@@ -84,7 +84,7 @@ class LLMClient:
     ) -> "LLMClient":
         """从环境变量创建客户端，自动按可用 Key 配置 fallback 顺序。"""
 
-        oai_key = openai_key or os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
+        oai_key = openai_key or os.getenv("OPENAI_API_KEY")
         ant_key = anthropic_key or os.getenv("ANTHROPIC_API_KEY")
 
         preferred = [LLMProvider.OPENAI, LLMProvider.ANTHROPIC]
@@ -99,7 +99,7 @@ class LLMClient:
                         LLMProvider.OPENAI,
                         os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL", app_config.llm.default_model),
                         oai_key,
-                        os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL"),
+                        os.getenv("OPENAI_BASE_URL"),
                     )
                 )
             if provider == LLMProvider.ANTHROPIC and ant_key:

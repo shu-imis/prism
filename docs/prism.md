@@ -284,8 +284,7 @@ prism/
 │   ├── ai_worker.py             # 通用 AI 调用工作线程
 │   ├── charts.py                # 折线图 / 雷达图 / 泳道图组件
 │   ├── widgets.py               # 可复用组件
-│   ├── styles.py                # 色彩常量 + QSS 生成
-│   └── text_utils.py            # 文本规范化（兼容导出）
+│   └── styles.py                # 色彩常量 + QSS 生成
 ├── core/
 │   ├── agent.py                 # 行为体数据类 + 模板
 │   ├── agent_factory.py         # 行为体工厂

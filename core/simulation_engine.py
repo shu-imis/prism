@@ -19,6 +19,7 @@ from core.world_state import AgentSnapshot, NodeState, WorldState
 from core import clamp, clamp_float
 from db.models import Checkpoint, CheckpointRepository, KnowledgeRepository, SimulationRoundRepository
 from llm.client import LLMClient
+from llm.config import build_llm_client
 from llm.prompts import AGENT_RESPONSE_SYSTEM
 
 AGENT_NODE_TYPES: dict[int, tuple[str, ...]] = {
@@ -433,7 +434,7 @@ class SimulationEngine:
 
     def _ensure_llm_client(self) -> LLMClient:
         if self.llm_client is None:
-            self.llm_client = LLMClient.from_env()
+            self.llm_client = build_llm_client()
         return self.llm_client
 
     def _initial_world_state(self, agents: list[Agent]) -> WorldState:

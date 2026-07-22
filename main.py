@@ -93,7 +93,6 @@ def main():
         _fid = QFontDatabase.addApplicationFontFromData(_f.read_bytes())
         if _fid >= 0:
             _families = QFontDatabase.applicationFontFamilies(_fid)
-            print(f"[Prism] font: {_families[0]}")
 
     # 初始化数据库
     try:

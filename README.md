@@ -91,8 +91,7 @@ prism/
 │   ├── ai_worker.py             # 通用 AI 调用工作线程
 │   ├── charts.py                # 折线图 / 雷达图 / 泳道图组件
 │   ├── widgets.py
-│   ├── styles.py
-│   └── text_utils.py            # 文本规范化（兼容导出）
+│   └── styles.py
 ├── core/                        # 仿真引擎 + 行为体 + 事件
 │   ├── agent.py
 │   ├── agent_factory.py

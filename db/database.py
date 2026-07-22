@@ -60,7 +60,6 @@ class Database:
     def migrate(self) -> None:
         """执行当前版本所需的完整 Schema 迁移。"""
 
-        self._reset_if_legacy_schema()
         with self.transaction() as conn:
             conn.executescript(
                 """
@@ -155,33 +154,6 @@ class Database:
                     ON knowledge_chunks(project_id);
                 """
             )
-
-    def _reset_if_legacy_schema(self) -> None:
-        """检测旧版本 schema 的库文件：备份后重建（内部测试阶段，不做表级迁移）。
-
-        判定特征：projects 含 strategies_json 列、simulation_rounds 含
-        strategy_id 列、或 reports 含 html 列（均为 v0.1 schema 痕迹）。
-        """
-        try:
-            proj_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(projects)")}
-            round_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(simulation_rounds)")}
-            report_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(reports)")}
-        except Exception:
-            return
-        legacy = (
-            "strategies_json" in proj_cols
-            or "strategy_id" in round_cols
-            or "html" in report_cols
-        )
-        if not legacy:
-            return
-        self.close()
-        backup = self.db_path.with_name(self.db_path.name + ".legacy.bak")
-        for suffix in ("", "-shm", "-wal"):
-            src = Path(str(self.db_path) + suffix)
-            if src.exists():
-                src.replace(Path(str(backup) + suffix))
-        print(f"[Prism] 检测到旧版本数据库，已备份为 {backup.name} 并重建")
 
     def close(self) -> None:
         if self._conn:

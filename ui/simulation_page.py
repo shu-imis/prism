@@ -28,7 +28,7 @@ from llm.analysis import analyze_evolution
 from llm.config import active_vendor_label, build_llm_client
 from report.generator import ReportGenerator
 from ui.styles import *
-from ui.text_utils import normalize_speech
+from core.text_utils import normalize_speech
 from ui.widgets import (
     Caption,
     Card,
