@@ -104,7 +104,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(body, 1)
         shadow_layout.addWidget(container)
 
-        # ---- 投影效果（弥散投影，与 QMenu 原生阴影同层次） ----
+        # ---- 投影效果（弥散投影，与弹出菜单同层次） ----
         drop_shadow = QGraphicsDropShadowEffect(container)
         drop_shadow.setBlurRadius(24)
         drop_shadow.setOffset(0, 4)

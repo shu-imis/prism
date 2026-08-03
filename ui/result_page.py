@@ -164,7 +164,7 @@ class ResultPage(QWidget):
         swim_card = Card()
         swim_header = QHBoxLayout()
         swim_header.addWidget(Title("演化过程", 14))
-        swim_hint = QLabel("悬停色块查看行动详情；红色周期含关键事件")
+        swim_hint = QLabel("点击色块查看行动详情；红色周期含关键事件")
         swim_hint.setStyleSheet(f"font-size:11px;color:{TEXT_MUTED};")
         swim_header.addStretch()
         swim_header.addWidget(swim_hint)

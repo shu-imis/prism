@@ -14,26 +14,24 @@ from config import DB_PATH, ROOT_DIR, app_config
 from llm.client import LLMClient, LLMError, LLMProvider, ProviderSettings
 
 PRESETS = [
-    {"label": "OpenAI", "proto": "openai", "url": "https://api.openai.com/v1", "model": "gpt-5.6-sol"},
     {"label": "Anthropic", "proto": "anthropic", "url": "https://api.anthropic.com", "model": "claude-fable-5"},
     {"label": "DeepSeek", "proto": "openai", "url": "https://api.deepseek.com", "model": "deepseek-v4-pro"},
-    {"label": "通义千问", "proto": "openai", "url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen3.7-max"},
     {"label": "Kimi", "proto": "openai", "url": "https://api.moonshot.cn/v1", "model": "kimi-k3"},
+    {"label": "OpenAI", "proto": "openai", "url": "https://api.openai.com/v1", "model": "gpt-5.6-sol"},
+    {"label": "通义千问", "proto": "openai", "url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen3.7-max"},
     {"label": "智谱", "proto": "openai", "url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-5.2"},
-    {"label": "阶跃星辰", "proto": "openai", "url": "https://api.stepfun.com/step_plan/v1", "model": "step-3.7-flash"},
     {"label": "自定义", "proto": "openai", "url": "", "model": ""},
 ]
 
 # 厂商索引 → .env 环境变量前缀
 VENDOR_ENV_PREFIX = {
-    0: "OPENAI",
-    1: "ANTHROPIC",
-    2: "DEEPSEEK",
-    3: "QWEN",
-    4: "KIMI",
+    0: "ANTHROPIC",
+    1: "DEEPSEEK",
+    2: "KIMI",
+    3: "OPENAI",
+    4: "QWEN",
     5: "ZHIPU",
-    6: "STEPFUN",
-    7: "CUSTOM",
+    6: "CUSTOM",
 }
 
 # 当前生效厂商索引（.env 中的键名），Step1/2/4 的 AI 功能与仿真统一使用

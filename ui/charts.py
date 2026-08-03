@@ -28,6 +28,7 @@ from ui.styles import (
     TEXT_PRIMARY,
     TEXT_SECONDARY,
 )
+from ui.widgets import TipLabel
 
 # 折线图的指标系列：字段名、颜色、图例格式化（统一取色自数据可视化色板）
 _SERIES = [
@@ -237,7 +238,7 @@ _CELL_H = 20
 
 
 class SwimlaneGrid(QWidget):
-    """7 行为体 × N 周期的行动色块矩阵，悬停显示行动详情。"""
+    """7 行为体 × N 周期的行动色块矩阵，点击色块显示行动详情。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -272,17 +273,18 @@ class SwimlaneGrid(QWidget):
         # 表头：周期序号（有关键事件的周期标红）
         # 格宽自适应：周期列均分可用宽度（24~56px），任意周期数都不溢出
         for col, state in enumerate(rounds, start=1):
-            header = QLabel(str(state.round))
-            header.setFont(mono)
             has_event = state.round in event_rounds
+            header = TipLabel(
+                str(state.round),
+                tip="该周期触发关键事件" if has_event else "",
+            )
+            header.setFont(mono)
             header.setStyleSheet(
                 f"color:{COLOR_RED if has_event else TEXT_MUTED};"
             )
             header.setAlignment(Qt.AlignCenter)
             header.setFixedHeight(14)
             header.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-            if has_event:
-                header.setToolTip("该周期触发关键事件")
             grid.addWidget(header, 0, col)
             grid.setColumnStretch(col, 1)
 
@@ -294,23 +296,23 @@ class SwimlaneGrid(QWidget):
             grid.addWidget(name, row, 0)
             for col, state in enumerate(rounds, start=1):
                 snapshot = state.agent_states.get(tmpl["id"])
-                cell = QLabel("")
-                cell.setFixedHeight(_CELL_H)
-                cell.setMinimumWidth(24)
-                cell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 action = snapshot.action_type if snapshot else ""
                 summary = (
                     (snapshot.decision_summary or snapshot.speech)
                     if snapshot and snapshot.spoke else ""
                 )
+                tip = ""
                 if snapshot and snapshot.spoke and action:
-                    color = ACTION_COLORS.get(action, "#E3E3DD")
-                    cell.setStyleSheet(f"background:{color};")
-                    label = ACTION_LABELS.get(action, action)
-                    tip = f"周期 {state.round} · {tmpl['name']}【{label}】"
+                    tip = f"周期 {state.round} · {tmpl['name']}【{ACTION_LABELS.get(action, action)}】"
                     if summary:
                         tip += f"\n{normalize_speech(summary)}"
-                    cell.setToolTip(tip)
+                cell = TipLabel("", tip=tip)
+                cell.setFixedHeight(_CELL_H)
+                cell.setMinimumWidth(24)
+                cell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                if tip:
+                    color = ACTION_COLORS.get(action, "#E3E3DD")
+                    cell.setStyleSheet(f"background:{color};")
                 else:
                     cell.setStyleSheet("background:transparent;")
                 grid.addWidget(cell, row, col)

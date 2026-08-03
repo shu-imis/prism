@@ -1,9 +1,9 @@
 """Prism 组件 — 简洁桌面组件"""
 from PySide6.QtWidgets import (
-    QButtonGroup, QFrame, QPushButton, QLineEdit, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy, QWidget,
+    QApplication, QButtonGroup, QFrame, QPushButton, QLineEdit, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy, QWidget,
 )
-from PySide6.QtCore import Qt, QRectF, Signal
-from PySide6.QtGui import QColor, QFont, QPainter
+from PySide6.QtCore import Qt, QEvent, QObject, QPoint, QRectF, Signal
+from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter
 from ui.styles import (
     TEXT_PRIMARY, TEXT_MUTED, TEXT_ON_DARK, ACCENT, BG_INPUT, BG_SURFACE, BG_HOVER,
     BORDER, BTN_H, PAD_LG, PAD_MD,
@@ -151,6 +151,166 @@ class StatusDot(QLabel):
         super().__init__("●", parent)
         self.setStyleSheet(f"color: {color}; font-size: 10px;")
         self.setFixedSize(12, 12)
+
+
+class PopupMenu(QFrame):
+    """自绘弹出菜单 — 替代 QMenu，避免 macOS 原生 NSMenu 渲染导致样式不一致。
+
+    用法：menu = PopupMenu(parent); menu.add_action("删除", cb); menu.popup(global_pos)
+    Qt.Popup 语义：点击菜单外区域自动关闭（与系统菜单一致），关闭即销毁。
+    """
+
+    _ITEM_QSS = f"""
+    QPushButton {{
+        border: none;
+        background: transparent;
+        padding: 6px 16px;
+        font-size: 12px;
+        color: {TEXT_PRIMARY};
+        text-align: left;
+    }}
+    QPushButton:hover {{ background: {TEXT_PRIMARY}; color: {TEXT_ON_DARK}; }}
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Popup | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet(f"PopupMenu {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; }}")
+        self._ly = QVBoxLayout(self)
+        self._ly.setContentsMargins(4, 4, 4, 4)
+        self._ly.setSpacing(0)
+
+    def add_action(self, text: str, callback) -> None:
+        btn = QPushButton(text)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setStyleSheet(self._ITEM_QSS)
+        btn.clicked.connect(lambda checked=False, cb=callback: (self.close(), cb()))
+        self._ly.addWidget(btn)
+
+    def popup(self, global_pos) -> None:
+        self.move(global_pos)
+        self.show()
+
+
+class _TipDismissFilter(QObject):
+    """全局解散过滤器：提示浮层打开期间，点击或滚动任意位置即关闭。
+
+    常驻安装、永不拦截事件（始终返回 False），浮层关闭时是完全的空转，
+    因此不影响应用内任何控件的交互。
+    """
+
+    def eventFilter(self, watched, event):
+        owner = TipLabel._owner
+        if owner is not None:
+            t = event.type()
+            # 点击宿主自身不在这里处理，交给宿主的 mousePressEvent 做开关切换
+            if t == QEvent.Wheel or (t == QEvent.MouseButtonPress and watched is not owner):
+                TipLabel.hide_tip()
+        return False
+
+
+class TipLabel(QLabel):
+    """点击查看提示的 QLabel — 替代原生 QToolTip，跨平台外观一致。
+
+    点击显示浮层；再次点击自身切换关闭；点击/滚动其他任意位置、切页、
+    宿主销毁时关闭。全应用同时最多一个浮层（类级管理）。
+    """
+
+    _TIP_QSS = (
+        f"background: {BG_SURFACE}; color: {TEXT_PRIMARY};"
+        f"border: 1px solid {BORDER}; padding: 4px 8px; font-size: 11px;"
+    )
+    _popup = None  # 当前打开的浮层（QLabel）
+    _owner = None  # 浮层所属的 TipLabel
+
+    def __init__(self, text="", tip="", parent=None):
+        super().__init__(text, parent)
+        self._tip = tip
+        if tip:
+            self.setCursor(Qt.PointingHandCursor)
+        # 注意：必须连接 lambda 而非自身绑定方法——Qt 销毁对象时会先清理
+        # "接收者是自身"的连接，self.destroyed.connect(self.method) 不会触发
+        self.destroyed.connect(lambda *args, s=self: TipLabel._on_owner_gone(s))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self._tip:
+            # accept 阻止事件向父级传播：传播会再次经过全局过滤器，
+            # 被误判为"点击浮层外部"而把刚打开的浮层立即关掉
+            event.accept()
+            if TipLabel._owner is self:
+                TipLabel.hide_tip()  # 再点一次 = 关闭
+            else:
+                TipLabel.show_tip(self)
+            return
+        super().mousePressEvent(event)
+
+    def event(self, event):
+        # 切页/父容器隐藏时（QStackedWidget 只隐藏不销毁）关闭所属浮层
+        if event.type() in (QEvent.Hide, QEvent.HideToParent) and TipLabel._owner is self:
+            TipLabel.hide_tip()
+        return super().event(event)
+
+    @classmethod
+    def _on_owner_gone(cls, owner) -> None:
+        if cls._owner is owner:
+            cls.hide_tip()
+
+    @classmethod
+    def show_tip(cls, owner) -> None:
+        cls.hide_tip()
+        popup = QLabel(owner._tip, None, Qt.ToolTip | Qt.FramelessWindowHint)
+        popup.setAttribute(Qt.WA_DeleteOnClose)
+        popup.setStyleSheet(cls._TIP_QSS)
+        popup.setWordWrap(True)
+
+        # 约束在光标所在屏幕的可用区域内：超宽先限宽换行，右/下溢出则回收到屏幕内
+        cursor_pos = QCursor.pos()
+        screen = QGuiApplication.screenAt(cursor_pos) or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry() if screen else None
+        if area:
+            max_w = max(200, area.width() - 24)
+            if popup.sizeHint().width() > max_w:
+                popup.setFixedWidth(max_w)
+            popup.adjustSize()
+            size = popup.size()
+            pos = cursor_pos + QPoint(12, 16)
+            if pos.x() + size.width() > area.right() + 1:
+                pos.setX(max(area.left(), area.right() - size.width() + 1))
+            if pos.y() + size.height() > area.bottom() + 1:
+                pos.setY(cursor_pos.y() - size.height() - 4)  # 下方放不下时翻转到光标上方
+        else:
+            pos = cursor_pos + QPoint(12, 16)
+        popup.move(pos)
+        popup.show()
+        # 浮层被外部销毁（如应用退出）时清空引用；按身份比对，
+        # 避免"关旧开新"后旧浮层的延迟销毁误清新浮层的引用
+        popup.destroyed.connect(lambda *args, p=popup: cls._on_popup_gone(p))
+        cls._popup = popup
+        cls._owner = owner
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(_TIP_DISMISS_FILTER)
+
+    @classmethod
+    def hide_tip(cls) -> None:
+        popup = cls._popup
+        cls._popup = None
+        cls._owner = None
+        if popup is not None:
+            try:
+                popup.close()  # WA_DeleteOnClose：关闭即销毁
+            except RuntimeError:
+                pass  # 浮层已随应用退出被销毁
+
+    @classmethod
+    def _on_popup_gone(cls, popup) -> None:
+        if cls._popup is popup:
+            cls._popup = None
+            cls._owner = None
+
+
+_TIP_DISMISS_FILTER = _TipDismissFilter()
 
 
 class NumberInput(QWidget):

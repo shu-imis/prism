@@ -18,7 +18,7 @@
 ## 核心特性
 
 - **全链路 AI 集成**：Step1 文档分析自动填写场景、Step2 AI 生成行为体配置、Step3 行为体决策、Step4 AI 叙述式综合分析（失败自动降级为公式报告）
-- **全局设置页**：8 家厂商预设（OpenAI / Anthropic / DeepSeek / 通义千问 / Kimi / 智谱 / 阶跃星辰 / 自定义），统一生效厂商，仿真轮次/决策温度/超时/重试可视化配置
+- **全局设置页**：7 家厂商预设（Anthropic / DeepSeek / Kimi / OpenAI / 通义千问 / 智谱 / 自定义，按品牌名字母序），统一生效厂商，仿真轮次/决策温度/超时/重试可视化配置
 - **多行为体 LLM 仿真**：每个行为体由独立 LLM prompt 驱动，根据全局状态自主决策
 - **行为体互动**：行动信息流 + 个性化观察层，行为体感知上下游邻居行动并显式回应，跨轮形成反应链
 - **种子事件注入**：世界干预在指定周期进入信息流，沿供应链链路传播扩散（MiroFish initial_posts 式）
@@ -63,7 +63,7 @@ git push origin v0.1.0
 | 用途 | 技术 |
 |------|------|
 | 桌面 UI | PySide6 |
-| LLM 调用 | OpenAI-compatible / Anthropic SDK（8 家厂商预设，统一生效厂商） |
+| LLM 调用 | OpenAI-compatible / Anthropic SDK（7 家厂商预设，统一生效厂商） |
 | 数据存储 | SQLite（WAL 模式） |
 | 报告导出 | Markdown |
 | 文档解析 | pypdf + python-docx |

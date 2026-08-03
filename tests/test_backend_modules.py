@@ -1011,18 +1011,18 @@ class AIIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"
             state = {
-                4: {"key": "kimi-key", "url": "https://api.moonshot.cn/v1", "model": "kimi-k2"},
+                2: {"key": "kimi-key", "url": "https://api.moonshot.cn/v1", "model": "kimi-k2"},
             }
             with mock.patch.dict(os.environ, {}, clear=True):
-                llm_config.persist_vendor_state(state, active_vendor=4, env_path=env_path)
+                llm_config.persist_vendor_state(state, active_vendor=2, env_path=env_path)
                 env_text = env_path.read_text(encoding="utf-8")
                 self.assertIn("KIMI_API_KEY=", env_text)
                 self.assertIn("kimi-key", env_text)
-                self.assertEqual(llm_config.get_active_vendor(), 4)
+                self.assertEqual(llm_config.get_active_vendor(), 2)
 
                 reloaded = llm_config.load_vendor_state()
-                self.assertEqual(reloaded[4]["key"], "kimi-key")
-                self.assertEqual(reloaded[4]["model"], "kimi-k2")
+                self.assertEqual(reloaded[2]["key"], "kimi-key")
+                self.assertEqual(reloaded[2]["model"], "kimi-k2")
 
                 settings = llm_config.get_active_provider_settings()
                 self.assertIsNotNone(settings)

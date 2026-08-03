@@ -1,10 +1,10 @@
 """首页 — 项目列表"""
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QGridLayout, QPushButton, QMenu,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QGridLayout, QPushButton,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from ui.styles import *
-from ui.widgets import Title, Caption, PrimaryBtn, StatusDot
+from ui.widgets import Title, Caption, PrimaryBtn, PopupMenu, StatusDot
 from db.models import ProjectRepository
 
 _STATUS_COLORS = {
@@ -56,6 +56,14 @@ class HomePage(QWidget):
         self._scroll.setWidget(self._inner)
         layout.addWidget(self._scroll, 1)
         self._current_cols = 1
+        self._last_cols = 0
+
+        # 拖拽改变尺寸时防抖：尺寸稳定后才重建网格，避免拖动过程中反复全量重建
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.setInterval(120)
+        self._resize_timer.timeout.connect(self._on_resize_settled)
+
         self.refresh()
 
     def _columns(self) -> int:
@@ -72,6 +80,11 @@ class HomePage(QWidget):
         projects = self._repo.list_all()
         cols = self._columns()
 
+        # 先清除所有历史列的拉伸因子，避免列数减少时残留的 stretch 把内容挤偏
+        for col in range(max(cols, self._last_cols)):
+            self._grid.setColumnStretch(col, 0)
+        self._last_cols = cols
+
         if not projects:
             empty = QLabel("暂无项目\n点击「＋ 新建项目」创建")
             empty.setAlignment(Qt.AlignCenter)
@@ -82,8 +95,6 @@ class HomePage(QWidget):
             self._grid.addWidget(empty, 0, 0, 1, cols, Qt.AlignCenter)
             return
 
-        for col in range(cols):
-            self._grid.setColumnStretch(col, 0)
         self._grid.setRowStretch(0, 0)
         for i, proj in enumerate(projects):
             btn = QPushButton()
@@ -126,14 +137,17 @@ class HomePage(QWidget):
             self._grid.addWidget(btn, i // cols, i % cols)
 
     def resizeEvent(self, event):
-        """窗口宽度变化时重新计算列数并刷新布局。"""
+        """窗口宽度变化时重新计算列数并刷新布局（防抖，拖拽稳定后才重建）。"""
         super().resizeEvent(event)
-        if hasattr(self, '_grid') and hasattr(self, '_scroll'):
-            new_cols = self._columns()
-            # 只有列数真正变化时才刷新，避免每次 resize 都重建
-            if new_cols != self._current_cols:
-                self._current_cols = new_cols
-                self.refresh()
+        if hasattr(self, '_resize_timer'):
+            self._resize_timer.start()
+
+    def _on_resize_settled(self):
+        new_cols = self._columns()
+        # 只有列数真正变化时才刷新，避免每次 resize 都重建
+        if new_cols != self._current_cols:
+            self._current_cols = new_cols
+            self.refresh()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -141,10 +155,6 @@ class HomePage(QWidget):
         self.refresh()
 
     def _on_context_menu(self, btn, pos, pid):
-        menu = QMenu()
-        menu.setStyleSheet(f"QMenu{{background:{BG_SURFACE};border:1px solid {BORDER};border-radius:0px;padding:4px;}} QMenu::item{{padding:6px 12px;color:{TEXT_PRIMARY};}} QMenu::item:selected{{background:{TEXT_PRIMARY};color:{TEXT_ON_DARK};}}")
-        delete_action = menu.addAction("删除")
-        action = menu.exec(btn.mapToGlobal(pos))
-        if action == delete_action:
-            self._repo.soft_delete(pid)
-            self.refresh()
+        menu = PopupMenu(self)
+        menu.add_action("删除", lambda: (self._repo.soft_delete(pid), self.refresh()))
+        menu.popup(btn.mapToGlobal(pos))
