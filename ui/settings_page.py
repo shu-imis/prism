@@ -222,7 +222,7 @@ class SettingsPage(QWidget):
 
         if not (ok_vendor and ok_vars):
             self._set_status(
-                "配置已生效，但 .env 写入失败，重启后将丢失", is_error=True
+                "配置已生效，但钥匙串/.env 写入失败，重启后将丢失", is_error=True
             )
             return
         label = PRESETS[self._provider_index]["label"]

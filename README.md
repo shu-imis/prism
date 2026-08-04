@@ -31,9 +31,10 @@
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env    # 编辑 .env，填入 LLM API Key
-python main.py          # 也可启动后在「设置」页直接填写并保存
+python main.py          # 启动后在「设置」页填写 LLM API Key 并保存
 ```
+
+在「设置」页保存的 API Key 会存入操作系统钥匙串（macOS 钥匙串 / Windows 凭据管理器），不落盘明文；无钥匙串后端的环境会改用本机特征派生密钥加密后存 `.env`（`enc:v1:` 前缀）。开发调试也可在 `.env`（复制自 `.env.example`）手动填明文 Key，启动后会自动迁移。
 
 ## 桌面端打包（GitHub Actions）
 
@@ -55,7 +56,7 @@ git push origin v0.1.0
 
 - 应用**未做代码签名/公证**。macOS 首次打开请右键 → 打开（或执行 `xattr -dr com.apple.quarantine /Applications/Prism.app`）；Windows SmartScreen 提示时选择「仍要运行」。如需签名，需额外配置 Apple Developer 证书等 secrets 并扩展 `.github/workflows/build.yml`。
 - 数据库存放于用户数据目录：macOS `~/Library/Application Support/Prism/`，Windows `%APPDATA%/Prism/`。
-- 打包后的应用按「用户数据目录 → exe 同目录 → 运行目录」顺序查找并加载首个 `.env`（参照 `.env.example` 填写 API Key），推荐放在上述用户数据目录。
+- 打包后的应用按「用户数据目录 → exe 同目录 → 运行目录」顺序查找并加载首个 `.env`（非敏感配置参照 `.env.example`），推荐放在上述用户数据目录；API Key 请在应用「设置」页填写，会保存到系统钥匙串而非 `.env`。
 - 本地打包：`pip install pyinstaller && pyinstaller prism.spec --noconfirm`（macOS 产出 `dist/Prism.app`，Windows 产出 `dist/Prism/`）。
 
 ## 技术栈

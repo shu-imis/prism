@@ -995,6 +995,22 @@ class BackendModuleTests(unittest.TestCase):
         self.assertIn("促销订单增长，需要补货。", markdown)
 
 
+class _FakeKeyring:
+    """内存版 keyring，避免测试触碰真实系统钥匙串。"""
+
+    def __init__(self) -> None:
+        self.store: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self.store.get((service, username))
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self.store[(service, username)] = password
+
+    def delete_password(self, service: str, username: str) -> None:
+        del self.store[(service, username)]
+
+
 class AIIntegrationTests(unittest.TestCase):
     """v0.3 全链路 AI 集成：全局配置、文档抽取、行为体生成、演化分析。"""
 
@@ -1007,17 +1023,23 @@ class AIIntegrationTests(unittest.TestCase):
         )
 
     def test_vendor_state_persist_and_reload(self) -> None:
-        """厂商配置写入 .env 并可从环境变量读回，生效厂商可切换。"""
+        """厂商配置持久化：key 入钥匙串（.env 不留明文），url/model 入 .env，生效厂商可切换。"""
         with tempfile.TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"
+            fake = _FakeKeyring()
             state = {
                 2: {"key": "kimi-key", "url": "https://api.moonshot.cn/v1", "model": "kimi-k2"},
             }
-            with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.dict(os.environ, {}, clear=True), \
+                    mock.patch.object(llm_config, "_get_keyring", return_value=fake):
                 llm_config.persist_vendor_state(state, active_vendor=2, env_path=env_path)
                 env_text = env_path.read_text(encoding="utf-8")
                 self.assertIn("KIMI_API_KEY=", env_text)
-                self.assertIn("kimi-key", env_text)
+                self.assertNotIn("kimi-key", env_text)  # 明文不落盘
+                self.assertEqual(
+                    fake.get_password(llm_config._KEYRING_SERVICE, "KIMI_API_KEY"),
+                    "kimi-key",
+                )
                 self.assertEqual(llm_config.get_active_vendor(), 2)
 
                 reloaded = llm_config.load_vendor_state()
@@ -1029,9 +1051,80 @@ class AIIntegrationTests(unittest.TestCase):
                 self.assertEqual(settings.provider, LLMProvider.OPENAI)
                 self.assertEqual(settings.api_key, "kimi-key")
 
+    def test_vendor_state_env_fallback_without_keyring(self) -> None:
+        """无钥匙串后端时回退本机绑定加密写 .env，不落明文且可解密读回。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            state = {
+                2: {"key": "kimi-key", "url": "https://api.moonshot.cn/v1", "model": "kimi-k2"},
+            }
+            with mock.patch.dict(os.environ, {}, clear=True), \
+                    mock.patch.object(llm_config, "_get_keyring", return_value=None), \
+                    mock.patch.object(
+                        llm_config, "_machine_secret", return_value=b"test-machine-id"
+                    ):
+                llm_config.persist_vendor_state(state, active_vendor=2, env_path=env_path)
+                env_text = env_path.read_text(encoding="utf-8")
+                self.assertNotIn("kimi-key", env_text)  # 明文不落盘
+                self.assertIn(llm_config._ENC_PREFIX, env_text)
+
+                # 模拟重启：清空进程环境变量，仅从 .env 密文恢复
+                with mock.patch.dict(os.environ, {}, clear=True):
+                    for line in env_text.splitlines():
+                        if line.startswith("KIMI_API_KEY="):
+                            os.environ["KIMI_API_KEY"] = line.split("=", 1)[1].strip("'\"")
+                    reloaded = llm_config.load_vendor_state()
+                    self.assertEqual(reloaded[2]["key"], "kimi-key")
+
+    def test_encrypted_value_migrates_to_keyring(self) -> None:
+        """无钥匙串时期写入的 enc:v1: 密文，在钥匙串可用后自动迁入并清空。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            fake = _FakeKeyring()
+            with mock.patch.object(
+                llm_config, "_machine_secret", return_value=b"test-machine-id"
+            ):
+                ciphertext = llm_config._encrypt_value("kimi-key")
+                self.assertIsNotNone(ciphertext)
+                with mock.patch.dict(os.environ, {"KIMI_API_KEY": ciphertext}, clear=True), \
+                        mock.patch.object(llm_config, "_get_keyring", return_value=fake), \
+                        mock.patch.object(
+                            llm_config, "_env_path",
+                            side_effect=lambda p=None: Path(p) if p else env_path,
+                        ):
+                    state = llm_config.load_vendor_state()
+                    self.assertEqual(state[2]["key"], "kimi-key")
+                    self.assertEqual(
+                        fake.get_password(llm_config._KEYRING_SERVICE, "KIMI_API_KEY"),
+                        "kimi-key",
+                    )
+                    self.assertEqual(os.environ["KIMI_API_KEY"], "")
+                    self.assertNotIn("kimi-key", env_path.read_text(encoding="utf-8"))
+
+    def test_plaintext_key_migrates_to_keyring(self) -> None:
+        """.env/环境变量残留的明文 Key 在读取时自动迁入钥匙串并清空明文。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            fake = _FakeKeyring()
+            with mock.patch.dict(os.environ, {"KIMI_API_KEY": "kimi-key"}, clear=True), \
+                    mock.patch.object(llm_config, "_get_keyring", return_value=fake), \
+                    mock.patch.object(
+                        llm_config, "_env_path",
+                        side_effect=lambda p=None: Path(p) if p else env_path,
+                    ):
+                state = llm_config.load_vendor_state()
+                self.assertEqual(state[2]["key"], "kimi-key")
+                self.assertEqual(
+                    fake.get_password(llm_config._KEYRING_SERVICE, "KIMI_API_KEY"),
+                    "kimi-key",
+                )
+                self.assertEqual(os.environ["KIMI_API_KEY"], "")
+                self.assertNotIn("kimi-key", env_path.read_text(encoding="utf-8"))
+
     def test_build_llm_client_without_key_returns_none(self) -> None:
         """未配置任何 API Key 时 build_llm_client 返回 None（AI 功能降级）。"""
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(llm_config, "_get_keyring", return_value=None):
             self.assertIsNone(llm_config.get_active_provider_settings())
             self.assertIsNone(llm_config.build_llm_client())
 

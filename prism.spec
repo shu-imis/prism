@@ -8,6 +8,8 @@ import re
 import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 ROOT = Path(SPECPATH)
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
@@ -26,7 +28,7 @@ a = Analysis(
         # 冻结后 main.py 从此文件读取版本号（prism 包在冻结时不可解析）
         ("__init__.py", "."),
     ],
-    hiddenimports=[],
+    hiddenimports=collect_submodules("keyring.backends"),
 )
 
 pyz = PYZ(a.pure)
