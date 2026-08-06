@@ -44,6 +44,17 @@ class LLMError(RuntimeError):
         self.failures = failures or []
 
 
+# SDK 客户端实例缓存：以 (provider, api_key, base_url) 为键复用连接池。
+# dict 读写对并发足够安全（最坏情况是多建一个实例）。
+_client_cache: dict = {}
+
+
+def _get_sdk_client(key: tuple, factory: Callable[[], Any]) -> Any:
+    if key not in _client_cache:
+        _client_cache[key] = factory()
+    return _client_cache[key]
+
+
 class LLMClient:
     """支持多厂商 fallback 的轻量 LLM 适配器。"""
 
@@ -153,15 +164,36 @@ class LLMClient:
                 try:
                     if self._transport:
                         return self._transport(provider, messages, options)
-                    return self._call_sdk(provider, messages, options)
+                    text, truncated = self._call_sdk(provider, messages, options)
+                    # 响应被 max_tokens 截断：放大到 8192 重试一次（仅一次，不走 max_retries 循环）
+                    if truncated and options["max_tokens"] < 8192:
+                        options = {**options, "max_tokens": 8192}
+                        text, _ = self._call_sdk(provider, messages, options)
+                    return text
                 except Exception as exc:  # noqa: BLE001 - 第三方 SDK 错误类型不统一
                     failures.append(f"{provider.provider.value} attempt {attempt + 1}: {exc}")
+                    # 错误分类（OpenAI/Anthropic SDK 的 APIStatusError 均带 status_code）：
+                    # 4xx 永久性错误重试无意义，直接 break 切换下一个厂商
+                    if getattr(exc, "status_code", None) in (400, 401, 403, 404, 422):
+                        break
                     if attempt < self.max_retries:
-                        time.sleep(self.retry_base_seconds * (2**attempt))
+                        time.sleep(self._retry_delay(exc, attempt))
                     else:
                         break
 
         raise LLMError("所有已配置的 LLM 厂商均调用失败", failures)
+
+    def _retry_delay(self, exc: Exception, attempt: int) -> float:
+        """429 限流优先按响应头 Retry-After 等待（封顶 30s），否则指数退避。"""
+        if getattr(exc, "status_code", None) == 429:
+            headers = getattr(getattr(exc, "response", None), "headers", None)
+            retry_after = headers.get("retry-after") if headers else None
+            try:
+                if retry_after is not None:
+                    return min(float(retry_after), 30.0)
+            except (TypeError, ValueError):
+                pass
+        return self.retry_base_seconds * (2**attempt)
 
     def chat_json(
         self,
@@ -189,7 +221,8 @@ class LLMClient:
         provider: ProviderSettings,
         messages: Sequence[Message],
         options: dict[str, Any],
-    ) -> str:
+    ) -> tuple[str, bool]:
+        """调用厂商 SDK，返回 (文本, 是否因 max_tokens 截断)。"""
         if provider.provider == LLMProvider.OPENAI:
             return self._call_openai(provider, messages, options)
         if provider.provider == LLMProvider.ANTHROPIC:
@@ -201,7 +234,7 @@ class LLMClient:
         provider: ProviderSettings,
         messages: Sequence[Message],
         options: dict[str, Any],
-    ) -> str:
+    ) -> tuple[str, bool]:
         try:
             from openai import OpenAI
         except ImportError as exc:
@@ -214,21 +247,28 @@ class LLMClient:
         request: dict[str, Any] = {
             "model": provider.model,
             "messages": list(messages),
-            "temperature": options["temperature"],
-            "max_tokens": options["max_tokens"],
         }
+        model_lower = provider.model.lower()
+        if model_lower.startswith(("o1", "o3", "o4")) or "reasoning" in model_lower:
+            # reasoning 模型不收 temperature，且以 max_completion_tokens 计量
+            request["max_completion_tokens"] = options["max_tokens"]
+        else:
+            request["temperature"] = options["temperature"]
+            request["max_tokens"] = options["max_tokens"]
         if options.get("json_mode"):
             request["response_format"] = {"type": "json_object"}
 
-        response = OpenAI(**kwargs).chat.completions.create(**request)
-        return strip_model_noise(response.choices[0].message.content or "")
+        client = _get_sdk_client(("openai", provider.api_key, provider.base_url), lambda: OpenAI(**kwargs))
+        response = client.chat.completions.create(**request)
+        choice = response.choices[0]
+        return strip_model_noise(choice.message.content or ""), choice.finish_reason == "length"
 
     @staticmethod
     def _call_anthropic(
         provider: ProviderSettings,
         messages: Sequence[Message],
         options: dict[str, Any],
-    ) -> str:
+    ) -> tuple[str, bool]:
         try:
             from anthropic import Anthropic
         except ImportError as exc:
@@ -246,25 +286,33 @@ class LLMClient:
                         "content": message.get("content", ""),
                     }
                 )
+        if options.get("json_mode"):
+            # Anthropic 无 response_format：system 约束 + assistant 预填 "{" 强制 JSON
+            system_prompt = (system_prompt + "\n只输出一个 JSON 对象，不要输出其他内容").strip()
+            user_messages.append({"role": "assistant", "content": "{"})
 
         kwargs: dict[str, Any] = {"api_key": provider.api_key, "timeout": options["timeout"]}
         if provider.base_url:
             kwargs["base_url"] = provider.base_url
 
-        response = Anthropic(**kwargs).messages.create(
+        client = _get_sdk_client(("anthropic", provider.api_key, provider.base_url), lambda: Anthropic(**kwargs))
+        response = client.messages.create(
             model=provider.model,
             system=system_prompt,
             messages=user_messages,
             temperature=options["temperature"],
             max_tokens=options["max_tokens"],
         )
-        return strip_model_noise("\n".join(getattr(block, "text", "") for block in response.content))
+        text = "\n".join(getattr(block, "text", "") for block in response.content)
+        if options.get("json_mode"):
+            text = "{" + text  # 拼回预填的开括号
+        return strip_model_noise(text), response.stop_reason == "max_tokens"
 
 
 def strip_model_noise(text: str) -> str:
-    """移除常见模型思考标签和外层空白。"""
+    """移除常见模型思考标签（<think>/<thinking>，大小写不敏感）和外层空白。"""
 
-    return re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+    return re.sub(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", "", text, flags=re.IGNORECASE).strip()
 
 
 def parse_json_object(raw: str) -> Any:
@@ -279,15 +327,21 @@ def parse_json_object(raw: str) -> Any:
     except json.JSONDecodeError:
         pass
 
-    candidate = _extract_balanced_json(cleaned)
-    if not candidate:
-        raise ValueError(f"无法从 LLM 返回中定位 JSON: {raw[:200]}")
+    # 逐个尝试全部平衡括号片段：模型可能先给 [引用] 之类的非 JSON 片段
+    last_error: json.JSONDecodeError | None = None
+    for candidate in _extract_balanced_json(cleaned):
+        candidate = re.sub(r",(\s*[}\]])", r"\1", candidate)
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise ValueError(f"无法从 LLM 返回中定位 JSON: {raw[:200]}")
 
-    candidate = re.sub(r",(\s*[}\]])", r"\1", candidate)
-    return json.loads(candidate)
 
-
-def _extract_balanced_json(text: str) -> str | None:
+def _extract_balanced_json(text: str):
+    """产出文本中全部平衡括号片段（模型可能在解释文字之后再给 JSON）。"""
     starts = [idx for idx, ch in enumerate(text) if ch in "[{"]
     for start in starts:
         stack: list[str] = []
@@ -311,5 +365,5 @@ def _extract_balanced_json(text: str) -> str | None:
                 if not stack or stack.pop() != ch:
                     break
                 if not stack:
-                    return text[start : idx + 1]
-    return None
+                    yield text[start : idx + 1]
+                    break

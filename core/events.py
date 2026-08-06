@@ -68,12 +68,14 @@ class EventDetector:
     def __init__(self):
         self._supplier_delay_count = 0       # 供应商连续延迟计数
         self._regulator_risk_count = 0       # 监管机构连续标记风险计数
+        self._overflow_cooldown = 0          # 爆仓事件冷却轮数（避免每轮重复触发）
 
     def to_dict(self) -> dict:
         """序列化连续计数，供检查点续传（跨断点保持"连续两轮"检测链）。"""
         return {
             "supplier_delay_count": self._supplier_delay_count,
             "regulator_risk_count": self._regulator_risk_count,
+            "overflow_cooldown": self._overflow_cooldown,
         }
 
     @classmethod
@@ -82,6 +84,7 @@ class EventDetector:
         detector = cls()
         detector._supplier_delay_count = int(data.get("supplier_delay_count", 0))
         detector._regulator_risk_count = int(data.get("regulator_risk_count", 0))
+        detector._overflow_cooldown = int(data.get("overflow_cooldown", 0))
         return detector
 
     def detect(
@@ -104,9 +107,12 @@ class EventDetector:
             events.append(self._make_event(state, EventType.RAW_MATERIAL_SHORTAGE))
             self._supplier_delay_count = 0
 
-        # 2. 仓储爆仓（库存 > 90 视为爆仓风险）
-        if state.inventory_level > 90:
+        # 2. 仓储爆仓（库存 > 90 视为爆仓风险；触发后冷却 2 轮，避免成本滚雪球）
+        if self._overflow_cooldown > 0:
+            self._overflow_cooldown -= 1
+        elif state.inventory_level > 90:
             events.append(self._make_event(state, EventType.WAREHOUSE_OVERFLOW))
+            self._overflow_cooldown = 2
 
         # 3. 价格战触发（零售商利润率为负）
         if retailer_margin_negative and state.profit_margin < 0:

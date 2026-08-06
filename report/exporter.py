@@ -10,8 +10,13 @@ from pathlib import Path
 
 from core.text_utils import normalize_speech
 from core.world_state import WorldState
-from report.generator import SimulationReport
+from report.generator import SCORE_KEY_RESILIENCE, SimulationReport
 from report.timeline import AGENT_NAMES, build_timeline_entries, format_rounds_span
+
+
+def _inline(text: str) -> str:
+    """折叠内部空白/换行为单个空格，避免 LLM/用户文本破坏 Markdown 行结构。"""
+    return " ".join(str(text).split())
 
 
 class ReportExporter:
@@ -26,9 +31,9 @@ class ReportExporter:
 
     @staticmethod
     def to_markdown(report: SimulationReport, rounds: list[WorldState] | None = None) -> str:
-        resilience = report.scores.get("风险抵御", 0)
+        resilience = report.scores.get(SCORE_KEY_RESILIENCE, 0)
         lines = [
-            f"# {report.project_name} - 供应链演化仿真报告",
+            f"# {_inline(report.project_name)} - 供应链演化仿真报告",
             "",
             "## 演化概述",
             report.evolution_summary or "暂无摘要。",
@@ -42,9 +47,9 @@ class ReportExporter:
             f"| 库存水平 | {report.final_inventory:.1f} | {report.inventory_delta:+.1f} |",
             f"| 成本指数 | {report.final_cost:.1f} | {report.cost_delta:+.1f} |",
             f"| 交付延迟 | {report.final_delivery_delay:.1f} 周期 | {report.delay_delta:+.1f} |",
-            f"| 服务水平 | {report.final_service_level:.0%} | {report.service_delta:+.2f} |",
+            f"| 服务水平 | {report.final_service_level:.0%} | {report.service_delta:+.1%} |",
             f"| 利润率 | {report.final_profit_margin:+.1%} | {report.margin_delta:+.1%} |",
-            f"| 风险抵御 | {resilience:.1f} | — |",
+            f"| {SCORE_KEY_RESILIENCE} | {resilience:.1f} | — |",
         ]
 
         if rounds:
@@ -93,11 +98,11 @@ class ReportExporter:
         """演化时间线 Markdown 条目：事件与行为体行动片段按周期交织。"""
         entries = build_timeline_entries(rounds)
         if not entries:
-            return ["- 本轮演化无关键事件与行为体行动"]
+            return ["- 本次仿真无关键事件与行为体行动"]
         lines = []
         for entry in entries:
             if entry["kind"] == "event":
-                lines.append(f"- 周期 {entry['round']}：⚡ {entry['description']}")
+                lines.append(f"- 周期 {entry['round']}：⚡ {_inline(entry['description'])}")
                 continue
             name = AGENT_NAMES.get(entry["agent_id"], f"行为体{entry['agent_id']}")
             span = format_rounds_span(entry["start"], entry["end"])
@@ -108,5 +113,5 @@ class ReportExporter:
             duration = ""
             if entry["end"] > entry["start"]:
                 duration = f"（持续 {entry['end'] - entry['start'] + 1} 轮）"
-            lines.append(f"- {span}：{name}{action}{reaction}：{normalize_speech(entry['summary'])}{duration}")
+            lines.append(f"- {span}：{name}{action}{reaction}：{normalize_speech(_inline(entry['summary']))}{duration}")
         return lines

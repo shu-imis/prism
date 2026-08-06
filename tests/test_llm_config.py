@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from core.agent_factory import AgentFactory
-from llm.client import LLMClient, LLMProvider, ProviderSettings
+from llm.client import LLMClient, LLMProvider, ProviderSettings, parse_json_object, strip_model_noise
 import llm.analysis as llm_analysis
 import llm.config as llm_config
 from tests.helpers import FakeKeyring, make_json_client
@@ -66,6 +66,103 @@ class LLMConfigTests(unittest.TestCase):
         self.assertEqual(observed[0].provider, LLMProvider.OPENAI)
         self.assertEqual(observed[0].model, "deepseek-chat")
         self.assertEqual(observed[0].base_url, "https://api.deepseek.com")
+
+    def test_parse_json_object_tries_all_balanced_candidates(self) -> None:
+        """parse_json_object：逐个尝试平衡括号片段，跳过非 JSON 的前置片段。"""
+        result = parse_json_object('说明 [见附录] {"a": 1}')
+        self.assertEqual(result, {"a": 1})
+
+    def test_clamp_int_handles_infinity(self) -> None:
+        """_clamp_int：Infinity/-Infinity/NaN 回退默认值，不抛 OverflowError。"""
+        self.assertEqual(llm_analysis._clamp_int(float("inf"), 0, 100, 50), 50)
+        self.assertEqual(llm_analysis._clamp_int(float("-inf"), 0, 100, 50), 50)
+        self.assertEqual(llm_analysis._clamp_int(float("nan"), 0, 100, 50), 50)
+
+    def test_llm_retry_permanent_error_skips_to_next_provider(self) -> None:
+        """4xx 永久性错误（带 status_code）不重试，直接切换下一个厂商。"""
+        calls: list[str] = []
+
+        class _StatusError(Exception):
+            status_code = 401
+
+        def fake_transport(provider, messages, options):
+            calls.append(provider.provider.value)
+            if provider.provider == LLMProvider.OPENAI:
+                raise _StatusError("invalid api key")
+            return '{"ok": true}'
+
+        client = LLMClient(
+            providers=[
+                ProviderSettings(LLMProvider.OPENAI, "gpt-4o-mini", "key"),
+                ProviderSettings(LLMProvider.ANTHROPIC, "claude", "key"),
+            ],
+            max_retries=3,
+            transport=fake_transport,
+        )
+
+        result = client.chat_json("只返回 JSON", "ping")
+        self.assertTrue(result["ok"])
+        # openai 只尝试一次（不重试），随后切到 anthropic
+        self.assertEqual(calls, ["openai", "anthropic"])
+
+    def test_llm_retry_after_header_respected(self) -> None:
+        """429 限流带 Retry-After 响应头时按头等待（封顶 30s）。"""
+        attempts: list[int] = []
+
+        class _RateLimitError(Exception):
+            status_code = 429
+
+            class response:
+                headers = {"retry-after": "7"}
+
+        def fake_transport(provider, messages, options):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise _RateLimitError("rate limited")
+            return '{"ok": true}'
+
+        client = LLMClient(
+            providers=[ProviderSettings(LLMProvider.OPENAI, "gpt-4o-mini", "key")],
+            max_retries=1,
+            transport=fake_transport,
+        )
+
+        with mock.patch("llm.client.time.sleep") as sleep_mock:
+            result = client.chat_json("只返回 JSON", "ping")
+
+        self.assertTrue(result["ok"])
+        sleep_mock.assert_called_once_with(7.0)
+
+    def test_truncated_response_retried_with_larger_max_tokens(self) -> None:
+        """截断重试：SDK 路径报告截断时以 max_tokens=8192 重试一次（仅一次）。"""
+        client = LLMClient(
+            providers=[ProviderSettings(LLMProvider.OPENAI, "m", "key")],
+            max_retries=0,
+        )
+        seen_max_tokens = []
+
+        def fake_call_sdk(self_, provider, messages, options):
+            seen_max_tokens.append(options["max_tokens"])
+            # 第一次报告截断，第二次完整（即使再次截断也不会第三次调用）
+            return ("部分文本", True) if len(seen_max_tokens) == 1 else ("完整文本", False)
+
+        with mock.patch.object(LLMClient, "_call_sdk", fake_call_sdk):
+            result = client.chat("sys", "user")
+
+        self.assertEqual(result, "完整文本")
+        self.assertEqual(seen_max_tokens, [4096, 8192])
+
+    def test_strip_model_noise_variants(self) -> None:
+        """strip_model_noise：大小写不敏感，兼容 <thinking> 变体。"""
+        self.assertEqual(strip_model_noise("<Think>想</Think>结果"), "结果")
+        self.assertEqual(strip_model_noise("<thinking>想</thinking>结果"), "结果")
+        self.assertEqual(strip_model_noise("<think>想</think>结果"), "结果")
+
+    def test_extract_scenario_rejects_empty_nodes(self) -> None:
+        """场景抽取：nodes 为空时抛 ValueError（未能识别供应链节点）。"""
+        payload = '{"title": "t", "background": "有背景但无节点", "nodes": []}'
+        with self.assertRaises(ValueError):
+            llm_analysis.extract_scenario_from_docs(make_json_client(payload), "文档")
 
     def test_vendor_state_persist_and_reload(self) -> None:
         """厂商配置持久化：key 入钥匙串（.env 不留明文），url/model 入 .env，生效厂商可切换。"""

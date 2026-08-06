@@ -59,7 +59,7 @@ class Agent:
             pressure=data.get("pressure", 0.0),
             capacity=data.get("capacity", 1.0),
             active_cycles=data.get("active_cycles", []),
-            profile=data["profile"],
+            profile=data.get("profile", ""),
         )
 
 

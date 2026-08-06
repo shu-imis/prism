@@ -41,10 +41,12 @@ def _load_env() -> None:
             _data_dir = (Path(_appdata) if _appdata else Path.home() / "AppData" / "Roaming") / "Prism"
         else:
             _data_dir = Path.home() / ".local" / "share" / "Prism"
-        candidates += [
+        # 与 docstring 顺序一致：用户提供的 .env 优先，bundle 内置的仅作兜底
+        candidates = [
             _data_dir / ".env",
             Path(sys.executable).resolve().parent / ".env",
             Path.cwd() / ".env",
+            _RESOURCE_ROOT / ".env",
         ]
     for env_path in candidates:
         if env_path.exists():
@@ -54,7 +56,7 @@ def _load_env() -> None:
 
 _load_env()
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontDatabase, QIcon
 
@@ -85,21 +87,22 @@ def main():
     if _icon_path.exists():
         app.setWindowIcon(QIcon(str(_icon_path)))
 
-    # 加载项目自带字体
+    # 加载项目自带字体（注册后样式表中的字体族名即可命中）
     _fonts_dir = _RESOURCE_ROOT / "assets" / "fonts"
     for _f in _fonts_dir.glob("*.ttf"):
         if _f.name.startswith("."):
             continue
-        _fid = QFontDatabase.addApplicationFontFromData(_f.read_bytes())
-        if _fid >= 0:
-            _families = QFontDatabase.applicationFontFamilies(_fid)
+        QFontDatabase.addApplicationFontFromData(_f.read_bytes())
 
     # 初始化数据库
     try:
         db = Database()
         db.migrate()
     except Exception as e:
-        print(f"[Prism] 数据库初始化失败: {e}")
+        # 冻结包里 print 不可见：弹窗告知并以非零码退出，
+        # 带病继续运行只会在后续随机崩溃
+        QMessageBox.critical(None, "数据库初始化失败", f"无法初始化本地数据库：\n{e}")
+        sys.exit(1)
 
     # 启动主窗口
     window = MainWindow()

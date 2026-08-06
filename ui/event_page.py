@@ -115,20 +115,20 @@ class NodeEditor(QWidget):
                 _select_type(v, s, ws)
             )
             # 悬停态，与 SegmentedControl 的 QPushButton:hover 一致
-            def _make_enter(l=val, s=selected_type, w=lbl):
+            def _on_enter(l=val, s=selected_type, w=lbl):
                 if s["val"] != l:
                     w.setStyleSheet(
                         f"background:{BG_HOVER};color:{TEXT_PRIMARY};"
                         "border:1px solid " + BORDER + ";padding:2px 9px;font-size:12px;"
                     )
-            def _make_leave(l=val, s=selected_type, w=lbl):
+            def _on_leave(l=val, s=selected_type, w=lbl):
                 if s["val"] != l:
                     w.setStyleSheet(
                         f"background:transparent;color:{TEXT_MUTED};"
                         f"border:1px solid {BORDER};padding:2px 9px;font-size:12px;"
                     )
-            lbl.enterEvent = lambda e, fn=_make_enter: fn()
-            lbl.leaveEvent = lambda e, fn=_make_leave: fn()
+            lbl.enterEvent = lambda e, fn=_on_enter: fn()
+            lbl.leaveEvent = lambda e, fn=_on_leave: fn()
             node_type_widgets.append((val, lbl))
             row1.addWidget(lbl)
         row1.addStretch()
@@ -245,6 +245,8 @@ class EventPage(QWidget):
         super().__init__(parent)
         self._pid = None
         self._imported = []
+        # 终端日志回调：默认空实现，由 ProcessPage 注入覆盖（单独实例化也能用）
+        self.log = lambda *args, **kwargs: None
         self._build()
 
     def _build(self):
@@ -282,9 +284,9 @@ class EventPage(QWidget):
             f"{MAX_IMPORT_TOTAL_CHARS}字"
         ))
         btn_row = QHBoxLayout()
-        import_btn = SecondaryBtn("导入背景文档")
-        import_btn.clicked.connect(self._import_docs)
-        btn_row.addWidget(import_btn)
+        self._import_btn = SecondaryBtn("导入背景文档")
+        self._import_btn.clicked.connect(self._import_docs)
+        btn_row.addWidget(self._import_btn)
         self._ai_btn = GhostBtn("AI 分析并自动填写")
         self._ai_btn.clicked.connect(self._ai_fill)
         btn_row.addWidget(self._ai_btn)
@@ -377,14 +379,31 @@ class EventPage(QWidget):
         files, _ = QFileDialog.getOpenFileNames(
             self, "导入文档", "", "文档(*.pdf *.docx *.md *.txt)"
         )
-        if files:
-            try:
-                self._imported = import_documents(files)
-                self._render_imported_docs()
-                self.log(f"已导入 {len(self._imported)} 个文档")
-            except Exception as e:
-                self.log(f"导入失败：{e}", is_error=True)
-                return
+        if not files:
+            return
+        # PDF/Word 解析耗时，放 worker 线程执行避免冻结界面
+        self._import_btn.setEnabled(False)
+        self._import_btn.setText("导入中…")
+        run_ai_task(
+            self,
+            lambda: import_documents(files),
+            self._on_docs_imported,
+            self._on_docs_import_error,
+        )
+
+    def _reset_import_btn(self):
+        self._import_btn.setEnabled(True)
+        self._import_btn.setText("导入背景文档")
+
+    def _on_docs_imported(self, imported):
+        self._reset_import_btn()
+        self._imported = imported
+        self._render_imported_docs()
+        self.log(f"已导入 {len(self._imported)} 个文档")
+
+    def _on_docs_import_error(self, err):
+        self._reset_import_btn()
+        self.log(f"导入失败：{err}", is_error=True)
 
     @staticmethod
     def _clear_layout(layout):
@@ -476,10 +495,11 @@ class EventPage(QWidget):
             return
         self._ai_btn.setEnabled(False)
         self._ai_btn.setText("AI 分析中…")
+        pid = self._pid
         run_ai_task(
             self,
             lambda: extract_scenario_from_docs(client, docs_text),
-            self._on_ai_scenario,
+            lambda sc: self._on_ai_scenario(sc, pid),
             self._on_ai_error,
         )
 
@@ -487,8 +507,11 @@ class EventPage(QWidget):
         self._ai_btn.setEnabled(True)
         self._ai_btn.setText("AI 分析并自动填写")
 
-    def _on_ai_scenario(self, sc):
+    def _on_ai_scenario(self, sc, pid):
         self._reset_ai_btn()
+        # 等待期间用户可能已切换项目：pid 不匹配则忽略结果，避免旧数据填进新页面
+        if pid != self._pid:
+            return
         if sc.get("title"):
             self._title.setText(sc["title"])
         if sc.get("industry"):
@@ -538,13 +561,16 @@ class EventPage(QWidget):
             # update_scenario 为全量替换：先读旧 scenario 再仅覆盖本步字段，
             # 保留 Step2 写入的 agents_config / seed_events
             project = repo.get_by_id(self._pid)
-            if project:
-                merged = dict(project.scenario)
-                merged.update(sc)
-                sc = merged
-                # 场景变更使旧仿真结果失效：清轮次/检查点/报告并回到草稿
-                if project.status in ("completed", "interrupted"):
-                    invalidate_simulation_results(self._pid)
+            if project is None:
+                # 项目已在首页被删除：不保存、不崩，提示用户重新创建
+                self.log("项目已被删除，请回到首页重新创建或打开其他项目", is_error=True)
+                return
+            merged = dict(project.scenario)
+            merged.update(sc)
+            sc = merged
+            # 场景变更使旧仿真结果失效：清轮次/检查点/报告并回到草稿
+            if project.status in ("completed", "interrupted"):
+                invalidate_simulation_results(self._pid)
             p = repo.update_scenario(self._pid, sc)
             pid = p.id
         else:

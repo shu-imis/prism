@@ -89,6 +89,33 @@ class ReportingTests(unittest.TestCase):
 
         self.assertIn("促销订单增长，需要补货。", markdown)
 
+    def test_export_inlines_newlines_in_user_text(self) -> None:
+        """项目名/行为体发言中的内部换行被折叠为单空格，导出时间线无裸换行。"""
+        generator = ReportGenerator("含\n换行的项目", "背景")
+        rounds = [
+            WorldState(
+                round=1,
+                agent_states={
+                    2: AgentSnapshot(
+                        agent_id=2,
+                        pressure=0.1,
+                        decision_stance="cooperative",
+                        spoke=True,
+                        speech="促销订单增长\n需要补货",
+                        action_type="adjust_supply",
+                        reaction_to="none",
+                    )
+                },
+            )
+        ]
+        generator.add_simulation_result(rounds)
+        report = generator.generate()
+
+        markdown = ReportExporter.to_markdown(report, rounds)
+
+        self.assertIn("# 含 换行的项目 - 供应链演化仿真报告", markdown)
+        self.assertIn("促销订单增长 需要补货。", markdown)
+
     def test_analyze_evolution_and_report_round_trip(self) -> None:
         """演化分析：LLM 叙述写入 report.ai_analysis，序列化往返保留；失败时抛异常供降级。"""
         generator = ReportGenerator("demo", "背景")

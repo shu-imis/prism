@@ -32,11 +32,16 @@ class Scenario:
 
     @classmethod
     def from_dict(cls, data: dict) -> Scenario:
-        return cls(**{
-            k: v for k, v in data.items()
-            if k in {"title", "industry", "background", "nodes",
-                     "initial_inventory", "baseline_cost", "baseline_service_level"}
-        })
+        # 复用 parse 的数值钳制：DB 恢复路径同样受 clamp 保护
+        return ScenarioParser.parse(
+            title=data.get("title", ""),
+            industry=data.get("industry", ""),
+            background=data.get("background", ""),
+            nodes=data.get("nodes", []),
+            initial_inventory=data.get("initial_inventory", 75.0),
+            baseline_cost=data.get("baseline_cost", 50.0),
+            baseline_service_level=data.get("baseline_service_level", 0.85),
+        )
 
 
 class ScenarioParser:

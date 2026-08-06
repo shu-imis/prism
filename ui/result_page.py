@@ -269,6 +269,7 @@ class ResultPage(QWidget):
         self._verdict.setText("")
         self._clear_layout(self._kpi_row)
         self._clear_layout(self._ai_body)
+        self._ai_btn.setEnabled(True)
         self._ai_btn.setText("生成 AI 分析")
         self._chart.set_rounds([])
         self._radar.set_scores({})
@@ -395,7 +396,7 @@ class ResultPage(QWidget):
             self,
             lambda: analyze_evolution(client, report, rounds),
             lambda analysis: self._on_ai_analysis(analysis, pid),
-            self._on_ai_analysis_error,
+            lambda err: self._on_ai_analysis_error(err, pid),
         )
 
     def _reset_ai_btn(self):
@@ -406,6 +407,7 @@ class ResultPage(QWidget):
     def _on_ai_analysis(self, analysis, pid):
         # 等待期间用户可能已切换项目：只有仍在原项目时才渲染并落库
         if pid != self._pid or not self._report:
+            self._reset_ai_btn()  # 早退也要恢复按钮，避免永久禁用
             return
         self._report.ai_analysis = analysis
         self._render_ai_analysis()
@@ -422,8 +424,11 @@ class ResultPage(QWidget):
             except Exception:
                 pass  # 展示已成功，落库失败不影响查看
 
-    def _on_ai_analysis_error(self, err):
+    def _on_ai_analysis_error(self, err, pid):
         self._reset_ai_btn()
+        # 与成功路径一致：pid 不匹配说明已切换项目，不用旧错误覆盖当前界面
+        if pid != self._pid:
+            return
         self._clear_layout(self._ai_body)
         self._ai_body.addWidget(Caption(f"AI 分析失败：{err}"))
 

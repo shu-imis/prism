@@ -11,6 +11,10 @@ from ui.process_page import ProcessPage
 from ui.settings_page import SettingsPage
 from ui.title_bar import TitleBar
 
+# 关窗时仍在运行的 AI worker 挂到这里防止 GC 析构（避免 "QThread: Destroyed
+# while running"），进程退出时随解释器一起回收
+_orphaned_ai_workers: list = []
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -127,6 +131,19 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """窗口关闭前安全停止工作线程，避免 PySide6 QThread 析构崩溃。"""
         self._process.stop_worker()
+        # 各页面运行中的 AI worker（LLM 调用最长 180s）：断开信号并把引用挂到
+        # 模块级列表，防止 GC 析构运行中的 QThread；不 wait() 阻塞关窗，
+        # 进程自然退出，请求跑完即被回收
+        for page in (self._process._ep, self._process._sp, self._process._rp, self._settings):
+            workers = getattr(page, "_ai_workers", None) or []
+            for worker in workers:
+                try:
+                    worker.succeeded.disconnect()
+                    worker.failed.disconnect()
+                except (RuntimeError, TypeError):
+                    pass
+                _orphaned_ai_workers.append(worker)
+            workers.clear()
         super().closeEvent(event)
 
     def _center(self):

@@ -36,6 +36,22 @@ def _default_db_path() -> Path:
 DB_PATH = _default_db_path()
 
 
+def _env_int(name: str, default: int) -> int:
+    """读取整型环境变量；空串/非数字等非法值回退默认（避免 import 期崩溃）。"""
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """读取浮点环境变量；空串/非数字等非法值回退默认（避免 import 期崩溃）。"""
+    try:
+        return float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 # ============================================================
 # 仿真默认配置
 # ============================================================
@@ -68,14 +84,15 @@ class AppConfig:
     def from_env(cls) -> AppConfig:
         """从环境变量加载配置（.env 兜底）"""
         sim = SimulationDefaults(
-            max_rounds=int(os.getenv("SIM_MAX_ROUNDS", "12")),
+            max_rounds=_env_int("SIM_MAX_ROUNDS", 12),
+            round_timeout=_env_int("SIM_ROUND_TIMEOUT", 120),
         )
         llm = LLMDefaults(
             default_model=os.getenv("LLM_DEFAULT_MODEL", "gpt-5.6-sol"),
-            temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
-            decision_temperature=float(os.getenv("LLM_DECISION_TEMPERATURE", "0.35")),
-            max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
-            request_timeout=int(os.getenv("LLM_REQUEST_TIMEOUT", "30")),
+            temperature=_env_float("LLM_TEMPERATURE", 0.7),
+            decision_temperature=_env_float("LLM_DECISION_TEMPERATURE", 0.35),
+            max_retries=_env_int("LLM_MAX_RETRIES", 3),
+            request_timeout=_env_int("LLM_REQUEST_TIMEOUT", 30),
         )
         return cls(sim=sim, llm=llm)
 

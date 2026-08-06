@@ -11,6 +11,9 @@ from typing import Any
 from core.world_state import WorldState
 from core import clamp
 
+# 六维评估中「风险抵御」的评分键：exporter 引用同一常量，避免硬编码字符串漂移
+SCORE_KEY_RESILIENCE = "风险抵御"
+
 
 @dataclass
 class SimulationReport:
@@ -157,7 +160,7 @@ def score_evolution(
         "成本控制": clamp(100 - final.cost_index + min(0, cost_delta) * 0.5),
         "交付稳定性": clamp(100 - final.delivery_delay * 10 - abs(delay_delta) * 15),
         "库存健康度": clamp(final.inventory_level * 0.8 + (10 if inventory_delta > 0 else -5)),
-        "风险抵御": clamp(final.resilience_score),
+        SCORE_KEY_RESILIENCE: clamp(final.resilience_score),
         "协同效率": clamp(final.service_level * 100 + service_delta * 30),
         "可执行性": clamp(65 + margin_delta * 40),
     }
@@ -210,6 +213,6 @@ def build_evolution_summary(
         f"共推演 {cycles} 个周期：库存 {first.inventory_level:.1f} → {final.inventory_level:.1f}"
         f"（{inventory_delta:+.1f}），成本 {first.cost_index:.1f} → {final.cost_index:.1f}"
         f"（{cost_delta:+.1f}），服务水平 {first.service_level:.0%} → {final.service_level:.0%}"
-        f"（{service_delta:+.2f}），利润率 {first.profit_margin:+.1%} → {final.profit_margin:+.1%}"
+        f"（{service_delta:+.1%}），利润率 {first.profit_margin:+.1%} → {final.profit_margin:+.1%}"
         f"（{margin_delta:+.1%}）；期间触发关键事件 {len(key_events)} 起。"
     )

@@ -85,7 +85,11 @@ def chunk_text(
 def _read_document_text(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix in {".md", ".markdown", ".txt"}:
-        return path.read_text(encoding="utf-8", errors="ignore")
+        try:
+            return path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # 中文 Windows 的 ANSI(GBK) 文本：回退 GBK，忽略仍无法解码的字符
+            return path.read_text(encoding="gbk", errors="ignore")
     if suffix == ".pdf":
         try:
             from pypdf import PdfReader

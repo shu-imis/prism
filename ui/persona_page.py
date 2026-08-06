@@ -49,6 +49,8 @@ class PersonaPage(QWidget):
         self._pid = None
         self._agent_cards = []
         self._seed_rows = []
+        # 终端日志回调：默认空实现，由 ProcessPage 注入覆盖（单独实例化也能用）
+        self.log = lambda *args, **kwargs: None
         self._build()
 
     def _build(self):
@@ -239,10 +241,11 @@ class PersonaPage(QWidget):
             return
         self._ai_btn.setEnabled(False)
         self._ai_btn.setText("AI 生成中…")
+        pid = self._pid
         run_ai_task(
             self,
             lambda: generate_agent_config(client, scenario),
-            self._on_ai_config,
+            lambda result: self._on_ai_config(result, pid),
             self._on_ai_error,
         )
 
@@ -250,8 +253,11 @@ class PersonaPage(QWidget):
         self._ai_btn.setEnabled(True)
         self._ai_btn.setText("AI 生成行为体配置")
 
-    def _on_ai_config(self, result):
+    def _on_ai_config(self, result, pid):
         self._reset_ai_btn()
+        # 等待期间用户可能已切换项目：pid 不匹配则忽略结果，避免旧数据填进新页面
+        if pid != self._pid:
+            return
         self._apply_agents_config(result.get("agents_config", {}))
         self._apply_seed_events(result.get("seed_events", []))
         self.log("AI 已生成行为体配置与种子事件，请核对后保存")

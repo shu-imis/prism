@@ -43,7 +43,11 @@ def extract_scenario_from_docs(client: LLMClient, docs_text: str) -> dict[str, A
     text = (docs_text or "").strip()
     if not text:
         raise ValueError("没有可供分析的文档内容")
-    data = client.chat_json(SCENARIO_EXTRACTION_SYSTEM, text[:MAX_DOC_CHARS])
+    user_message = text[:MAX_DOC_CHARS]
+    if len(text) > MAX_DOC_CHARS:
+        # 明示截断，避免模型编造不可见部分
+        user_message += "\n\n注意：文档因长度限制被截断，仅基于可见内容抽取，不要编造缺失部分。"
+    data = client.chat_json(SCENARIO_EXTRACTION_SYSTEM, user_message)
     return _validate_scenario(data)
 
 
@@ -121,7 +125,7 @@ def analyze_evolution(client: LLMClient, report, rounds: list) -> dict[str, Any]
 def _clamp_int(value, lo: int, hi: int, default: int) -> int:
     try:
         return max(lo, min(hi, int(float(value))))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: int(float("inf"))
         return default
 
 
@@ -162,6 +166,9 @@ def _validate_scenario(data: dict[str, Any]) -> dict[str, Any]:
             "upstream": _str_list(raw.get("upstream")),
             "downstream": _str_list(raw.get("downstream")),
         })
+
+    if not nodes:
+        raise ValueError("未能从文档识别供应链节点")
 
     background = str(data.get("background", "")).strip()
     if not background:

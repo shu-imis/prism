@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from core.action_feed import ActionFeed, ActionRecord
 from core.agent_factory import AgentFactory
 from core.document_importer import chunk_text, import_documents, render_imported_documents
 from core.events import EventDetector
-from core.scenario_parser import ScenarioParser
+from core.scenario_parser import Scenario, ScenarioParser
 from core.simulation_engine import SimulationEngine
+from core.text_utils import normalize_speech
 from core.world_state import KeyEvent, WorldState
+from config import AppConfig
 from llm.client import LLMClient, LLMProvider, ProviderSettings
 from tests.helpers import make_always_active_agents
 
@@ -30,6 +34,28 @@ class CoreModuleTests(unittest.TestCase):
             self.assertIn("background.md", rendered)
             self.assertLessEqual(len(imported[0].text), 20)
             self.assertGreaterEqual(len(chunks), 2)
+
+    def test_document_importer_reads_gbk_text(self) -> None:
+        """GBK（中文 Windows ANSI）编码的 .txt 能读出中文，而非被静默吞空。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "gbk_doc.txt"
+            path.write_bytes("供应链背景：原材料涨价。".encode("gbk"))
+
+            imported = import_documents([path])
+
+            self.assertEqual(len(imported), 1)
+            self.assertIn("原材料涨价", imported[0].text)
+
+    def test_app_config_from_env_tolerates_invalid_values(self) -> None:
+        """非法/空环境变量回退默认值，import 期不崩溃。"""
+        with mock.patch.dict(
+            os.environ,
+            {"SIM_MAX_ROUNDS": "abc", "LLM_TEMPERATURE": ""},
+            clear=True,
+        ):
+            cfg = AppConfig.from_env()
+        self.assertEqual(cfg.sim.max_rounds, 12)
+        self.assertEqual(cfg.llm.temperature, 0.7)
 
     def test_world_state_serialization_round_trip(self) -> None:
         """验证 WorldState 供应链字段的序列化。"""
@@ -67,8 +93,6 @@ class CoreModuleTests(unittest.TestCase):
 
     def test_normalize_speech(self) -> None:
         """验证行为体发言标点规范化。"""
-        from core.text_utils import normalize_speech
-
         # 英文标点转全角（仅 CJK 语境）
         self.assertEqual(normalize_speech("库存不足,需要补货;尽快"), "库存不足，需要补货；尽快。")
         # 句末英文句号转全角
@@ -79,6 +103,18 @@ class CoreModuleTests(unittest.TestCase):
         # 非 CJK 语境不误伤（URL、英文句）
         self.assertEqual(normalize_speech("see https://a.b/c, ok."), "see https://a.b/c, ok.")
         self.assertEqual(normalize_speech(""), "")
+
+    def test_normalize_speech_ellipsis(self) -> None:
+        """结尾三连点归一为中文省略号，句中三连点不动。"""
+        # 结尾 "..." → "…"（已是终止标点，不再补句号，也不会变成 "..。" 畸形）
+        self.assertEqual(normalize_speech("不确定..."), "不确定…")
+        # 句中 "..." 原样保留，句末仍补句号
+        self.assertEqual(normalize_speech("库存不足...需要观察"), "库存不足...需要观察。")
+
+    def test_normalize_speech_closing_punct(self) -> None:
+        """闭引号/闭括号后的半角逗号转全角；闭符号结尾不补句号。"""
+        self.assertEqual(normalize_speech("他说「好」,然后走了"), "他说「好」，然后走了。")
+        self.assertEqual(normalize_speech("风险可控」"), "风险可控」")
 
     def test_event_detector_quiet_rounds_produce_no_events(self) -> None:
         """验证安静轮次不产生事件（自然恢复不作为关键事件）。"""
@@ -110,6 +146,38 @@ class CoreModuleTests(unittest.TestCase):
         fresh = EventDetector.from_dict({})
         events = fresh.detect(WorldState(round=1, simulated_hour=1), supplier_delayed=True)
         self.assertEqual(events, [])
+
+    def test_event_detector_overflow_cooldown(self) -> None:
+        """爆仓事件触发后冷却 2 轮：连续高库存不重复触发，冷却后恢复。"""
+        detector = EventDetector()
+        first = detector.detect(WorldState(round=1, simulated_hour=1, inventory_level=95))
+        self.assertEqual([e.event_type for e in first], ["warehouse_overflow"])
+        # 冷却期内（第 2、3 轮）库存仍超标也不重复触发
+        for round_index in (2, 3):
+            events = detector.detect(
+                WorldState(round=round_index, simulated_hour=round_index, inventory_level=95)
+            )
+            self.assertEqual(events, [])
+        # 冷却结束后恢复触发
+        fourth = detector.detect(WorldState(round=4, simulated_hour=4, inventory_level=95))
+        self.assertEqual([e.event_type for e in fourth], ["warehouse_overflow"])
+
+        # 冷却计数随检查点序列化续传（旧检查点缺省为 0）
+        self.assertEqual(detector.to_dict()["overflow_cooldown"], 2)
+        self.assertEqual(EventDetector.from_dict({}).to_dict()["overflow_cooldown"], 0)
+
+    def test_scenario_from_dict_clamps_values(self) -> None:
+        """Scenario.from_dict（DB 恢复路径）同样受数值钳制保护。"""
+        scenario = Scenario.from_dict({
+            "title": "t",
+            "initial_inventory": 250,
+            "baseline_cost": -10,
+            "baseline_service_level": 1.5,
+            "unknown_key": "ignored",
+        })
+        self.assertEqual(scenario.initial_inventory, 100.0)
+        self.assertEqual(scenario.baseline_cost, 0.0)
+        self.assertEqual(scenario.baseline_service_level, 1.0)
 
     def test_action_feed_visibility_rules(self) -> None:
         """验证行动信息流的邻居可见性、高影响力广播与自身排除。"""

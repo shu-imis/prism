@@ -106,8 +106,13 @@ class SegmentedControl(QWidget):
         return self._values.get(checked, "") if checked else ""
 
     def set_value(self, value: str) -> None:
+        matched = False
         for btn, v in self._values.items():
             btn.setChecked(v == value)
+            matched = matched or v == value
+        if not matched and self._values:
+            # 脏数据无匹配：独占 QButtonGroup 下旧选中会残留，显式回落到第一个选项
+            next(iter(self._values)).setChecked(True)
 
 
 class Input(QLineEdit):
@@ -358,18 +363,18 @@ class NumberInput(QWidget):
     def _increase(self):
         try:
             val = int(self._input.text())
-            val = min(val + self._step, self._max)
-            self._input.setText(str(val))
         except ValueError:
-            pass
+            val = self._min  # 非法输入从最小值起步
+        val = min(val + self._step, self._max)
+        self._input.setText(str(val))
 
     def _decrease(self):
         try:
             val = int(self._input.text())
-            val = max(val - self._step, self._min)
-            self._input.setText(str(val))
         except ValueError:
-            pass
+            val = self._min  # 非法输入从最小值起步
+        val = max(val - self._step, self._min)
+        self._input.setText(str(val))
 
     def _validate_input(self):
         try:
@@ -381,7 +386,7 @@ class NumberInput(QWidget):
 
     def value(self):
         try:
-            return int(self._input.text())
+            return max(self._min, min(int(self._input.text()), self._max))
         except ValueError:
             return self._min
 
@@ -489,18 +494,18 @@ class DecimalInput(QWidget):
     def _increase(self):
         try:
             val = float(self._input.text())
-            val = round(min(val + self._step, self._max), self._decimals)
-            self._input.setText(f"{val:.{self._decimals}f}")
         except ValueError:
-            pass
+            val = self._min  # 非法输入从最小值起步
+        val = round(min(val + self._step, self._max), self._decimals)
+        self._input.setText(f"{val:.{self._decimals}f}")
 
     def _decrease(self):
         try:
             val = float(self._input.text())
-            val = round(max(val - self._step, self._min), self._decimals)
-            self._input.setText(f"{val:.{self._decimals}f}")
         except ValueError:
-            pass
+            val = self._min  # 非法输入从最小值起步
+        val = round(max(val - self._step, self._min), self._decimals)
+        self._input.setText(f"{val:.{self._decimals}f}")
 
     def _validate_input(self):
         try:
@@ -512,7 +517,7 @@ class DecimalInput(QWidget):
 
     def value(self):
         try:
-            return float(self._input.text())
+            return max(self._min, min(float(self._input.text()), self._max))
         except ValueError:
             return self._min
 
