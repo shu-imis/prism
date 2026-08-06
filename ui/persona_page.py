@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from config import app_config
 from core.agent import AGENT_TEMPLATES
 from core.agent_factory import AgentFactory
-from db.models import ProjectRepository
+from db.models import ProjectRepository, invalidate_simulation_results
 from llm.analysis import generate_agent_config
 from llm.config import build_llm_client
 from ui.ai_worker import run_ai_task
@@ -297,6 +297,9 @@ class PersonaPage(QWidget):
         scenario = dict(project.scenario)
         scenario["agents_config"] = agents_config
         scenario["seed_events"] = seed_events
+        # 行为体/种子事件变更使旧仿真结果失效：清轮次/检查点/报告并回到草稿
+        if project.status in ("completed", "interrupted"):
+            invalidate_simulation_results(self._pid)
         repo.update_scenario(self._pid, scenario)
 
         self.agents_saved.emit(self._pid)

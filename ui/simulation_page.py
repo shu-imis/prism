@@ -46,7 +46,7 @@ class SimWorker(QThread):
     # 注意：不能定义名为 finished 的信号，会覆盖 QThread.finished(void)。
     # QThread.finished 由 Qt 在 run() 返回后自动发射，用于触发线程清理；
     # 被覆盖会导致 Qt6Core 内部状态机错乱，触发 __fastfail(FAST_FAIL_FATAL_APP_EXIT)。
-    succeeded = Signal(object, list)
+    succeeded = Signal(int, object, list)  # 携带项目 id，防跨项目串扰
     failed = Signal(str)
     recoverable = Signal(str)      # 中断但可恢复
 
@@ -59,6 +59,7 @@ class SimWorker(QThread):
         self._cancelled = False
         self._checkpoint = None
         self._engine = None
+        self._pending_round = None  # 暂停期间缓存的最新一轮负载，恢复后补发
 
     def set_checkpoint(self, checkpoint):
         self._checkpoint = checkpoint
@@ -74,6 +75,10 @@ class SimWorker(QThread):
         self._paused = False
         if self._engine is not None:
             self._engine.resume()
+        # 补发暂停期间缓存的最新一轮，避免 UI 日志/指标卡跳轮
+        if self._pending_round is not None:
+            payload, self._pending_round = self._pending_round, None
+            self.round_done.emit(payload)
 
     def cancel(self):
         """请求取消（协作式，由主线程调用）。
@@ -83,8 +88,26 @@ class SimWorker(QThread):
         """
         self._cancelled = True
         self._paused = True
+        self._pending_round = None  # 取消后不再补发暂停期缓存的轮次
         if self._engine is not None:
             self._engine.abort()
+
+    def _relay_round(self, state, messages):
+        """转发引擎轮次回调：暂停期间只缓存最新一轮，恢复后由 resume() 补发。"""
+        payload = {
+            "round": state.round,
+            "inventory": state.inventory_level,
+            "cost": state.cost_index,
+            "delay": state.delivery_delay,
+            "service": state.service_level,
+            "margin": state.profit_margin,
+            "resilience": state.resilience_score,
+            "messages": messages,
+        }
+        if self._paused:
+            self._pending_round = payload
+        else:
+            self.round_done.emit(payload)
 
     def run(self):
         try:
@@ -120,20 +143,7 @@ class SimWorker(QThread):
             engine.set_progress_callback(
                 lambda c, t, m: self.progress.emit(c, t, m)
             )
-            engine.set_round_callback(
-                lambda state, messages: (
-                    None if self._paused else self.round_done.emit({
-                        "round": state.round,
-                        "inventory": state.inventory_level,
-                        "cost": state.cost_index,
-                        "delay": state.delivery_delay,
-                        "service": state.service_level,
-                        "margin": state.profit_margin,
-                        "resilience": state.resilience_score,
-                        "messages": messages,
-                    })
-                )
-            )
+            engine.set_round_callback(self._relay_round)
 
             results = engine.run()
             # 发射结果前检查是否被取消：取消则直接返回，让 QThread.finished 自然触发清理
@@ -151,7 +161,7 @@ class SimWorker(QThread):
             except Exception:
                 pass
 
-            self.succeeded.emit(report, results)
+            self.succeeded.emit(self.pid, report, results)
         except SimulationRecoverableError as e:
             self.recoverable.emit(str(e))
         except Exception as e:
@@ -168,7 +178,7 @@ class SimWorker(QThread):
 
 
 class SimulationPage(QWidget):
-    simulation_completed = Signal(object, list)
+    simulation_completed = Signal(int, object, list)  # 携带项目 id，防跨项目串扰
     state_changed = Signal()  # 仿真运行状态变化（启动/暂停/结束），供工作区状态指示联动
     open_settings = Signal()  # 请求跳转到全局「设置」页
 
@@ -278,13 +288,54 @@ class SimulationPage(QWidget):
             self._log.append(text)
 
     def load_project(self, pid):
+        # 切换项目：取消旧仿真并断开其信号（不阻塞等待，引擎存检查点后自行退出）
+        self._orphan_worker()
         self._pid = pid
         self._reset()
         self._load_history()
 
     def reset_for_new_project(self):
+        self._orphan_worker()
         self._pid = None
         self._reset()
+
+    @staticmethod
+    def _disconnect_worker_signals(worker):
+        """断开 worker 的业务信号；已断开或 C++ 对象已销毁时静默跳过。"""
+        try:
+            worker.progress.disconnect()
+            worker.round_done.disconnect()
+            worker.succeeded.disconnect()
+            worker.failed.disconnect()
+            worker.recoverable.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+
+    def _orphan_worker(self):
+        """取消式接管旧 worker：请求取消并解除信号绑定后立刻放手。
+
+        与 _dispose_worker 不同，这里不 wait() 阻塞 UI 线程；引擎在当前
+        LLM 调用完成后保存检查点自行退出，旧项目以后可断点恢复。
+        """
+        worker = self._worker
+        if worker is None:
+            return
+        try:
+            worker.resume()  # 解除暂停，确保 abort 能在下一轮前生效
+            worker.cancel()
+        except RuntimeError:
+            pass  # C++ 对象已被 deleteLater 清理
+        self._disconnect_worker_signals(worker)
+        try:
+            worker.finished.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            worker.finished.connect(worker.deleteLater)
+        except RuntimeError:
+            pass
+        self._worker = None
+        self._signals_cleaned = False
 
     def _load_history(self):
         """从 DB 加载主仿真的历史轮次数据并回显到日志和指标卡。"""
@@ -325,11 +376,20 @@ class SimulationPage(QWidget):
             self._running = False
             return
 
-        self._bar.setValue(100)
-        self._st.setText("仿真已完成")
-        self._st.setVisible(True)
-        self._start.setText("✓ 已完成")
-        self._start.setEnabled(False)
+        # 完成判定与 ProcessPage._is_sim_done 同源，以 DB 项目状态为准；
+        # 致命失败后可能残留轮次但状态非 completed，此时必须允许重新启动
+        project = ProjectRepository().get_by_id(self._pid)
+        if project and project.status == "completed":
+            self._bar.setValue(100)
+            self._st.setText("仿真已完成")
+            self._st.setVisible(True)
+            self._start.setText("✓ 已完成")
+            self._start.setEnabled(False)
+        else:
+            self._st.setText("上次仿真未完成，可重新启动")
+            self._st.setVisible(True)
+            self._start.setText("▶ 启动仿真")
+            self._start.setEnabled(True)
         self._running = False
 
     def _toggle(self):
@@ -369,6 +429,15 @@ class SimulationPage(QWidget):
             if checkpoint:
                 self._worker.set_checkpoint(checkpoint)
                 self.log("检测到检查点，从断点恢复", is_error=False)
+            else:
+                # 全新启动：清掉上次运行残留的轮次，避免轮次 upsert 跨次混杂
+                main = next(
+                    (s for s in SimulationRepository().list_by_project(self._pid)
+                     if s.name == MAIN_SIMULATION_NAME),
+                    None,
+                )
+                if main:
+                    SimulationRoundRepository().delete_for_simulation(main.id)
         self._worker.progress.connect(self._on_progress)
         self._worker.round_done.connect(self._on_round)
         self._worker.succeeded.connect(self._on_succeeded)
@@ -406,14 +475,7 @@ class SimulationPage(QWidget):
         except RuntimeError:
             pass  # C++ 对象已被 deleteLater 清理
         if not self._signals_cleaned:
-            try:
-                w.progress.disconnect()
-                w.round_done.disconnect()
-                w.succeeded.disconnect()
-                w.failed.disconnect()
-                w.recoverable.disconnect()
-            except (RuntimeError, TypeError):
-                pass
+            self._disconnect_worker_signals(w)
         try:
             w.finished.disconnect()
         except (RuntimeError, TypeError):
@@ -434,24 +496,17 @@ class SimulationPage(QWidget):
         w = self._worker
         if w is None:
             return
-        try:
-            w.progress.disconnect()
-            w.round_done.disconnect()
-            w.succeeded.disconnect()
-            w.failed.disconnect()
-            w.recoverable.disconnect()
-        except (RuntimeError, TypeError):
-            pass
+        self._disconnect_worker_signals(w)
         self._signals_cleaned = True
         # 注意：不在此处置 self._worker = None，否则 _toggle 重启时无法
         # 调用 _dispose_worker 等待旧线程。deleteLater 足以保证对象回收。
 
-    def _on_succeeded(self, report, results):
+    def _on_succeeded(self, pid, report, results):
         self._running = False
         self._bar.setValue(100)
         self._start.setText("✓ 完成")
         self._start.setEnabled(False)
-        self.simulation_completed.emit(report, results)
+        self.simulation_completed.emit(pid, report, results)
         self.state_changed.emit()
 
     def _on_failed(self, msg):

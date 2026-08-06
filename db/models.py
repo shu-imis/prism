@@ -431,6 +431,10 @@ class ReportRepository:
         ).fetchall()
         return [ReportRecord(**dict(row)) for row in rows]
 
+    def delete_for_project(self, project_id: int) -> None:
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM reports WHERE project_id = ?", (project_id,))
+
 
 class CheckpointRepository:
     """仿真检查点持久化。"""
@@ -497,6 +501,28 @@ class CheckpointRepository:
     def delete_for_project(self, project_id: int) -> None:
         with self.db.transaction() as conn:
             conn.execute("DELETE FROM checkpoints WHERE project_id = ?", (project_id,))
+
+
+def invalidate_simulation_results(project_id: int) -> None:
+    """作废旧仿真结果：场景或行为体配置变更后，历史仿真数据不再有效。
+
+    删除主仿真轮次、检查点与报告，并把项目状态回退为 draft，
+    供 Step1/Step2 保存时在 completed/interrupted 项目上调用。
+    """
+    main = next(
+        (s for s in SimulationRepository().list_by_project(project_id)
+         if s.name == MAIN_SIMULATION_NAME),
+        None,
+    )
+    if main:
+        SimulationRoundRepository().delete_for_simulation(main.id)
+    CheckpointRepository().delete_for_project(project_id)
+    ReportRepository().delete_for_project(project_id)
+    project = ProjectRepository().get_by_id(project_id)
+    if project:
+        ProjectRepository().update_scenario(
+            project_id, dict(project.scenario), status="draft"
+        )
 
 
 class KnowledgeRepository:

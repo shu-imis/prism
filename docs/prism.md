@@ -308,7 +308,12 @@ prism/
 │   ├── database.py              # SQLite 连接 + 迁移
 │   └── models.py                # 数据模型 + Repository
 ├── tests/
-│   └── test_backend_modules.py  # 后台模块测试
+│   ├── helpers.py                 # 共享测试助手
+│   ├── test_simulation_engine.py  # 仿真引擎与检查点/恢复
+│   ├── test_llm_config.py         # LLM 客户端与厂商配置
+│   ├── test_core_modules.py       # 核心模块测试
+│   ├── test_repositories.py       # 数据库 Repository 测试
+│   └── test_reporting.py          # 报告生成与导出测试
 └── docs/
     ├── prism.md                 # 本文档
     └── roadmap.md                # 路线图

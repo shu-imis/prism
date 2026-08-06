@@ -237,6 +237,7 @@ class SimulationEngine:
             raise ValueError("至少需要配置一个行为体。")
 
         self.state.status = SimStatus.RUNNING
+        self._detector = None  # 事件检测器在 _run_simulation 中创建，供检查点续传
 
         try:
             rounds = self._run_simulation()
@@ -254,28 +255,41 @@ class SimulationEngine:
     def _run_simulation(self) -> list[WorldState]:
         max_rounds = self.state.config.max_rounds
         detector = EventDetector()
+        self._detector = detector
         resume = self._resume_payload
         if resume:
             agents = [Agent.from_dict(item) for item in resume.get("agents", [])]
-            rounds = [WorldState.from_dict(item) for item in resume.get("current_rounds", [])]
+            # 轮次历史优先从 simulation_rounds 表重建（检查点只存最新一份 last_state）
+            rounds = self._load_persisted_rounds()
+            if not rounds:  # 兼容旧格式检查点（current_rounds）或轮次缺失
+                if resume.get("current_rounds"):
+                    rounds = [WorldState.from_dict(item) for item in resume["current_rounds"]]
+                elif resume.get("last_state"):
+                    rounds = [WorldState.from_dict(resume["last_state"])]
             start_round = int(resume.get("last_round", 0)) + 1
             ws = rounds[-1] if rounds else self._initial_world_state(agents)
+            # 以检查点保存时的 max_rounds 为准：配置改小后恢复不应"零轮直接完成"
+            max_rounds = int(resume.get("max_rounds") or self.state.config.max_rounds)
+            self.state.total_rounds = max_rounds
+            # 续传事件检测器的连续计数，跨断点的"连续两轮"检测链不断裂
+            if resume.get("detector"):
+                self._detector = detector = EventDetector.from_dict(resume["detector"])
         else:
             agents = self._clone_agents()
             rounds = [self._initial_world_state(agents)]
             ws = rounds[0]
             start_round = 1
             self._persist_round(ws, [])
-            self._save_checkpoint(ws, agents, rounds)
+            self._save_checkpoint(ws, agents)
 
-        # 行动信息流：行为体互动的共享载体。检查点恢复时从空开始，
-        # 首轮观察降级为"暂无"，随后续轮次逐轮重建（不改变 checkpoint schema）
+        # 行动信息流：行为体互动的共享载体。feed 不入检查点，恢复时从空开始，
+        # 首轮观察降级为"暂无"，随后续轮次逐轮重建
         feed = ActionFeed()
 
         for round_index in range(start_round, max_rounds + 1):
             self._wait_if_paused()
             if self.state.status == SimStatus.ABORTED:
-                self._save_checkpoint(ws, agents, rounds)
+                self._save_checkpoint(ws, agents)
                 break
 
             self._inject_seed_events(feed, round_index)
@@ -289,7 +303,10 @@ class SimulationEngine:
             }
 
             turns: list[AgentTurn] = []
-            with ThreadPoolExecutor(max_workers=len(active_agents)) as executor:
+            # 手动管理 executor：with 退出即 shutdown(wait=True)，会让超时未完成的
+            # LLM 调用阻塞整轮，round_timeout 形同虚设；改为不等待并取消排队任务
+            executor = ThreadPoolExecutor(max_workers=len(active_agents))
+            try:
                 future_to_agent = {
                     executor.submit(
                         self._generate_agent_turn,
@@ -298,8 +315,10 @@ class SimulationEngine:
                     ): agent
                     for agent in active_agents
                 }
+                seen: set = set()
                 try:
                     for future in as_completed(future_to_agent, timeout=self.state.round_timeout):
+                        seen.add(future)
                         agent = future_to_agent[future]
                         try:
                             turn = future.result()
@@ -309,9 +328,21 @@ class SimulationEngine:
                         turns.append(turn)
                 except TimeoutError:
                     for future, agent in future_to_agent.items():
-                        if not future.done():
+                        if future in seen:
+                            continue
+                        if future.done():
+                            # 超时瞬间已完成但未出队的结果取回，避免静默丢失
+                            try:
+                                turn = future.result()
+                            except Exception as exc:  # noqa: BLE001 - LLM SDK 错误类型不统一
+                                turn = self._skipped_turn(agent, str(exc))
+                            self._apply_agent_turn(agent, turn)
+                            turns.append(turn)
+                        else:
                             future.cancel()
                             turns.append(self._skipped_turn(agent, "本轮超过最大耗时，已跳过。", warning="round_timeout"))
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
             # 按行为体 ID 排序，保证输出确定性
             turns.sort(key=lambda t: t.agent_id)
 
@@ -399,7 +430,7 @@ class SimulationEngine:
                 )
 
             self._persist_round(ws, messages)
-            self._save_checkpoint(ws, agents, rounds)
+            self._save_checkpoint(ws, agents)
             self._emit_callbacks(ws, messages)
 
         return rounds
@@ -469,7 +500,6 @@ class SimulationEngine:
         self,
         state: WorldState,
         agents: list[Agent],
-        current_rounds: list[WorldState],
     ) -> None:
         repo = self.state.checkpoint_repository
         project_id = self.state.project_id
@@ -479,11 +509,15 @@ class SimulationEngine:
         engine_state = {
             "last_round": state.round,
             "agents": [agent.to_dict() for agent in agents],
-            "current_rounds": [round_state.to_dict() for round_state in current_rounds],
+            # 轮次历史已逐轮持久化在 simulation_rounds 表，检查点只存最新一份
+            # 快照，避免每轮重复序列化全部历史造成 O(N²) 写放大
+            "last_state": state.to_dict(),
             "scenario": self.state.scenario.to_dict() if self.state.scenario else {},
             "seed_events": self.state.config.seed_events,
             "max_rounds": self.state.config.max_rounds,
         }
+        if self._detector is not None:
+            engine_state["detector"] = self._detector.to_dict()
         repo.save(
             project_id=project_id,
             simulation_id=simulation_id,
@@ -852,6 +886,17 @@ class SimulationEngine:
             if self._rng.random() < 0.3:
                 agent.pressure = clamp(agent.pressure + avg_downstream_pressure * 0.15, 0.0, 1.0)
                 agent.capacity = clamp(agent.capacity - 0.03, 0.3, 1.5)
+
+    def _load_persisted_rounds(self) -> list[WorldState]:
+        """从 simulation_rounds 表重建完整轮次历史（检查点不再内嵌全部快照）。"""
+        repo = self.state.round_repository
+        simulation_id = self._simulation_record_id()
+        if not repo or simulation_id is None:
+            return []
+        return [
+            WorldState.from_dict(record.state)
+            for record in repo.list_by_simulation(simulation_id)
+        ]
 
     def _persist_round(self, state: WorldState, messages: list[dict[str, Any]]) -> None:
         repo = self.state.round_repository

@@ -21,7 +21,7 @@ from core.document_importer import (
     chunk_text,
     import_documents,
 )
-from db.models import KnowledgeRepository, ProjectRepository
+from db.models import KnowledgeRepository, ProjectRepository, invalidate_simulation_results
 from llm.analysis import extract_scenario_from_docs
 from llm.config import build_llm_client
 from ui.ai_worker import run_ai_task
@@ -535,6 +535,16 @@ class EventPage(QWidget):
 
         repo = ProjectRepository()
         if self._pid:
+            # update_scenario 为全量替换：先读旧 scenario 再仅覆盖本步字段，
+            # 保留 Step2 写入的 agents_config / seed_events
+            project = repo.get_by_id(self._pid)
+            if project:
+                merged = dict(project.scenario)
+                merged.update(sc)
+                sc = merged
+                # 场景变更使旧仿真结果失效：清轮次/检查点/报告并回到草稿
+                if project.status in ("completed", "interrupted"):
+                    invalidate_simulation_results(self._pid)
             p = repo.update_scenario(self._pid, sc)
             pid = p.id
         else:

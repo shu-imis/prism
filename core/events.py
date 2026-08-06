@@ -69,6 +69,21 @@ class EventDetector:
         self._supplier_delay_count = 0       # 供应商连续延迟计数
         self._regulator_risk_count = 0       # 监管机构连续标记风险计数
 
+    def to_dict(self) -> dict:
+        """序列化连续计数，供检查点续传（跨断点保持"连续两轮"检测链）。"""
+        return {
+            "supplier_delay_count": self._supplier_delay_count,
+            "regulator_risk_count": self._regulator_risk_count,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> EventDetector:
+        """从检查点恢复连续计数；缺省字段按 0 处理（兼容旧格式检查点）。"""
+        detector = cls()
+        detector._supplier_delay_count = int(data.get("supplier_delay_count", 0))
+        detector._regulator_risk_count = int(data.get("regulator_risk_count", 0))
+        return detector
+
     def detect(
         self,
         state: WorldState,

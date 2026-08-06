@@ -115,8 +115,13 @@ prism/
 ├── db/                          # SQLite 数据访问
 │   ├── database.py
 │   └── models.py
-├── tests/
-│   └── test_backend_modules.py
+├── tests/                         # 按主题拆分的后端测试
+│   ├── helpers.py                 # 共享测试助手（假 LLM、行为体、钥匙串）
+│   ├── test_simulation_engine.py  # 仿真引擎与检查点/恢复
+│   ├── test_llm_config.py         # LLM 客户端与厂商配置
+│   ├── test_core_modules.py       # 核心模块（事件/信息流/导入）
+│   ├── test_repositories.py       # 数据库 Repository
+│   └── test_reporting.py          # 报告生成与导出
 └── docs/
     ├── prism.md                 # 完整项目文档
     └── roadmap.md               # 路线图

@@ -152,7 +152,10 @@ class ProcessPage(QWidget):
         self._p(f"项目已保存（#{pid}）")
         self._advance()
 
-    def _on_done(self, r, res):
+    def _on_done(self, pid, r, res):
+        if pid != self._pid:
+            # 旧 worker 完成时当前可能已切换到其他项目，忽略避免跨项目串扰
+            return
         self._p("仿真已完成")
         self._update()
         self._rp.set_report(r, res, project_id=self._pid)
@@ -271,8 +274,12 @@ class ProcessPage(QWidget):
         if project and project.scenario.get("agents_config"):
             self._saved_steps.add(1)
         if project and project.status == "running":
-            # 重启后不存在仍在运行的仿真，running 必为陈旧状态
-            stale = "completed" if has_data else "draft"
+            # 重启后不存在仍在运行的仿真，running 必为陈旧状态；
+            # 中断的仿真同样每轮落库，须以检查点区分「中断」与「跑完」
+            stale = self._heal_stale_status(
+                has_checkpoint=bool(CheckpointRepository().latest_for_project(pid)),
+                has_data=has_data,
+            )
             ProjectRepository().update_scenario(pid, dict(project.scenario), status=stale)
         elif project and project.status == "interrupted":
             # 检查点已丢失则回退为草稿
@@ -285,6 +292,17 @@ class ProcessPage(QWidget):
         if self._is_sim_done():
             self._smp.load_project(pid)    # 预加载 Step 3 历史
             self._rp.load_results(pid)     # 预加载 Step 4 报告
+
+    @staticmethod
+    def _heal_stale_status(has_checkpoint: bool, has_data: bool) -> str:
+        """陈旧 running 状态的治愈判据。
+
+        有检查点说明仿真被中断（可断点恢复）；无检查点但有轮次/报告数据
+        说明已跑完；两者皆无则回到草稿。
+        """
+        if has_checkpoint:
+            return "interrupted"
+        return "completed" if has_data else "draft"
 
     @staticmethod
     def _has_rounds(pid) -> bool:
