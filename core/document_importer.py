@@ -1,11 +1,11 @@
-"""常见文档文本导入工具。"""
+"""纯文本文档（Markdown/TXT）导入工具。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
 
-SUPPORTED_DOCUMENT_SUFFIXES = {".pdf", ".docx", ".md", ".markdown", ".txt"}
+SUPPORTED_DOCUMENT_SUFFIXES = {".md", ".txt"}
 MAX_IMPORT_FILES = 20
 MAX_IMPORT_FILE_BYTES = 10 * 1024 * 1024
 MAX_IMPORT_TOTAL_CHARS = 80000
@@ -21,7 +21,7 @@ class ImportedDocument:
 
 
 def import_documents(paths: list[str | Path], max_total_chars: int = MAX_IMPORT_TOTAL_CHARS) -> list[ImportedDocument]:
-    """从常见文档中提取文本，限制文件数量、大小和总字符数。"""
+    """从纯文本文档中读取内容，限制文件数量、大小和总字符数。"""
 
     if len(paths) > MAX_IMPORT_FILES:
         raise ValueError(f"一次最多导入 {MAX_IMPORT_FILES} 个文档")
@@ -83,28 +83,11 @@ def chunk_text(
 
 
 def _read_document_text(path: Path) -> str:
-    suffix = path.suffix.lower()
-    if suffix in {".md", ".markdown", ".txt"}:
-        try:
-            return path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            # 中文 Windows 的 ANSI(GBK) 文本：回退 GBK，忽略仍无法解码的字符
-            return path.read_text(encoding="gbk", errors="ignore")
-    if suffix == ".pdf":
-        try:
-            from pypdf import PdfReader
-        except ImportError as exc:
-            raise RuntimeError("导入 PDF 需要安装 pypdf：pip install pypdf") from exc
-        reader = PdfReader(str(path))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
-    if suffix == ".docx":
-        try:
-            from docx import Document
-        except ImportError as exc:
-            raise RuntimeError("导入 Word 文档需要安装 python-docx：pip install python-docx") from exc
-        doc = Document(str(path))
-        return "\n".join(paragraph.text for paragraph in doc.paragraphs)
-    raise ValueError(f"不支持的文档类型: {path.name}")
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        # 中文 Windows 的 ANSI(GBK) 文本：回退 GBK，忽略仍无法解码的字符
+        return path.read_text(encoding="gbk", errors="ignore")
 
 
 def _normalize_text(text: str) -> str:

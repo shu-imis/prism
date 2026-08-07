@@ -280,7 +280,7 @@ class EventPage(QWidget):
         card.add(self._bg)
 
         card.add(Caption(
-            f"可导入PDF/Word/Markdown/TXT，最多{MAX_IMPORT_FILES}个文件，"
+            f"可导入Markdown/TXT，最多{MAX_IMPORT_FILES}个文件，"
             f"{MAX_IMPORT_TOTAL_CHARS}字"
         ))
         btn_row = QHBoxLayout()
@@ -377,11 +377,11 @@ class EventPage(QWidget):
 
     def _import_docs(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self, "导入文档", "", "文档(*.pdf *.docx *.md *.txt)"
+            self, "导入文档", "", "文档(*.md *.txt)"
         )
         if not files:
             return
-        # PDF/Word 解析耗时，放 worker 线程执行避免冻结界面
+        # 大文件读取耗时，放 worker 线程执行避免冻结界面
         self._import_btn.setEnabled(False)
         self._import_btn.setText("导入中…")
         run_ai_task(

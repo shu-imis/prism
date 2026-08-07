@@ -25,7 +25,7 @@
 - **关键事件系统**：5 种供应链事件（断供、爆仓、价格战、监管介入、需求激增）动态触发
 - **演化分析**：AI 综合分析 + 指标演化曲线 + 六维雷达图 + 行为体×周期泳道图
 - **检查点恢复**：每轮自动持久化，中断后可无缝继续
-- **RAG 知识检索**：导入 PDF/Word/Markdown 文档，仿真中自动检索相关背景
+- **RAG 知识检索**：导入 Markdown/TXT 文档，仿真中自动检索相关背景
 
 ## 快速开始
 
@@ -67,7 +67,7 @@ git push origin v0.1.0
 | LLM 调用 | OpenAI-compatible / Anthropic SDK（7 家厂商预设，统一生效厂商） |
 | 数据存储 | SQLite（WAL 模式） |
 | 报告导出 | Markdown |
-| 文档解析 | pypdf + python-docx |
+| 文档解析 | 纯文本读取（Markdown / TXT） |
 | 配置管理 | python-dotenv |
 
 ## 项目结构
