@@ -1,0 +1,6 @@
+anthropic
+cryptography
+keyring
+openai
+PySide6
+python-dotenv

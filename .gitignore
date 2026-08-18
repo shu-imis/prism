@@ -1,0 +1,29 @@
+# 环境变量
+.env
+
+# 数据库
+*.db
+*.db-shm
+*.db-wal
+
+# 构建产物
+dist/
+build/
+
+# 字节编译文件
+__pycache__/
+*.py[cod]
+
+# 测试缓存
+.pytest_cache/
+
+# 虚拟环境
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
