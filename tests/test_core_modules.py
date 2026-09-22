@@ -91,28 +91,21 @@ class CoreModuleTests(unittest.TestCase):
 
     def test_normalize_speech(self) -> None:
         """验证行为体发言标点规范化。"""
-        # 英文标点转全角（仅 CJK 语境）
-        self.assertEqual(normalize_speech("库存不足,需要补货;尽快"), "库存不足，需要补货；尽快。")
-        # 句末英文句号转全角
-        self.assertEqual(normalize_speech("减产保价."), "减产保价。")
-        # 无终止标点补句号；已有终止标点不动
-        self.assertEqual(normalize_speech("降价促销"), "降价促销。")
-        self.assertEqual(normalize_speech("风险可控。"), "风险可控。")
-        # 非 CJK 语境不误伤（URL、英文句）
-        self.assertEqual(normalize_speech("see https://a.b/c, ok."), "see https://a.b/c, ok.")
-        self.assertEqual(normalize_speech(""), "")
-
-    def test_normalize_speech_ellipsis(self) -> None:
-        """结尾三连点归一为中文省略号，句中三连点不动。"""
-        # 结尾 "..." → "…"（已是终止标点，不再补句号，也不会变成 "..。" 畸形）
-        self.assertEqual(normalize_speech("不确定..."), "不确定…")
-        # 句中 "..." 原样保留，句末仍补句号
-        self.assertEqual(normalize_speech("库存不足...需要观察"), "库存不足...需要观察。")
-
-    def test_normalize_speech_closing_punct(self) -> None:
-        """闭引号/闭括号后的半角逗号转全角；闭符号结尾不补句号。"""
-        self.assertEqual(normalize_speech("他说「好」,然后走了"), "他说「好」，然后走了。")
-        self.assertEqual(normalize_speech("风险可控」"), "风险可控」")
+        cases = [
+            ("库存不足,需要补货;尽快", "库存不足，需要补货；尽快。"),  # 英文标点转全角（仅 CJK 语境）
+            ("减产保价.", "减产保价。"),  # 句末英文句号转全角
+            ("降价促销", "降价促销。"),  # 无终止标点补句号
+            ("风险可控。", "风险可控。"),  # 已有终止标点不动
+            ("see https://a.b/c, ok.", "see https://a.b/c, ok."),  # 非 CJK 语境不误伤
+            ("", ""),
+            ("不确定...", "不确定…"),  # 结尾三连点归一为中文省略号，不再补句号
+            ("库存不足...需要观察", "库存不足...需要观察。"),  # 句中三连点保留，句末补句号
+            ("他说「好」,然后走了", "他说「好」，然后走了。"),  # 闭引号后的半角逗号转全角
+            ("风险可控」", "风险可控」"),  # 闭符号结尾不补句号
+        ]
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(normalize_speech(text), expected)
 
     def test_event_detector_quiet_rounds_produce_no_events(self) -> None:
         """验证安静轮次不产生事件（自然恢复不作为关键事件）。"""

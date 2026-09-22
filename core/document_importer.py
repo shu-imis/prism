@@ -35,6 +35,8 @@ def import_documents(paths: list[str | Path], max_total_chars: int = MAX_IMPORT_
         suffix = path.suffix.lower()
         if suffix not in SUPPORTED_DOCUMENT_SUFFIXES:
             raise ValueError(f"不支持的文档类型: {path.name}")
+        if not path.is_file():
+            raise ValueError(f"文件不存在或已被移动: {path.name}")
         if path.stat().st_size > MAX_IMPORT_FILE_BYTES:
             raise ValueError(f"文件过大: {path.name}，单个文件最多 10MB")
 

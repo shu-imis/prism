@@ -299,10 +299,10 @@ class SimulationEngineTests(unittest.TestCase):
             checkpoint = checkpoint_repo.latest_for_project(project.id)
             self.assertIsNotNone(checkpoint)
             engine_state = checkpoint.engine_state
-            # 检查点瘦身：只存最新一份快照与检测器计数，不再内嵌全部历史轮次
+            # 检查点只存最新一份快照与检测器计数
             self.assertIn("last_state", engine_state)
             self.assertIn("detector", engine_state)
-            self.assertNotIn("current_rounds", engine_state)
+            self.assertNotIn("current_rounds", engine_state)  # 历史轮次查 simulation_rounds 表
 
             second_engine = SimulationEngine(llm_client=make_fake_llm_client(), random_seed=1)
             second_engine.configure(
@@ -642,16 +642,6 @@ class SimulationEngineTests(unittest.TestCase):
 
         self.assertTrue(seen_options)
         self.assertTrue(all(o["temperature"] == 0.5 for o in seen_options))
-
-    def test_process_page_heal_stale_status(self) -> None:
-        """验证陈旧 running 状态的治愈判据：有检查点=中断，有数据=完成，否则草稿。"""
-        from ui.process_page import ProcessPage  # 局部导入，避免 UI 依赖拖累其他用例
-
-        heal = ProcessPage._heal_stale_status
-        self.assertEqual(heal(has_checkpoint=True, has_data=True), "interrupted")
-        self.assertEqual(heal(has_checkpoint=True, has_data=False), "interrupted")
-        self.assertEqual(heal(has_checkpoint=False, has_data=True), "completed")
-        self.assertEqual(heal(has_checkpoint=False, has_data=False), "draft")
 
 
 if __name__ == "__main__":

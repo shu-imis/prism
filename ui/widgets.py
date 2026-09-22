@@ -1,6 +1,6 @@
 """Prism 组件 — 简洁桌面组件"""
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QFrame, QPushButton, QLineEdit, QLabel, QLayout,
+    QApplication, QButtonGroup, QDialog, QFrame, QPushButton, QLineEdit, QLabel, QLayout,
     QVBoxLayout, QHBoxLayout, QSizePolicy, QWidget,
 )
 from PySide6.QtCore import Qt, QEvent, QObject, QPoint, QRectF, Signal
@@ -197,6 +197,45 @@ class PopupMenu(QFrame):
     def popup(self, global_pos) -> None:
         self.move(global_pos)
         self.show()
+
+
+class ConfirmDialog(QDialog):
+    """应用内确认弹窗 — 替代 QMessageBox，与自绘组件风格一致。
+
+    无边框卡片：标题 + 说明 + 取消/确认按钮。danger=True 时确认按钮
+    用 DangerBtn（红色警示）；cancel_text 传空串则只留确认按钮（纯通知）。
+    Esc 或点取消均为拒绝。
+    """
+
+    def __init__(self, parent, title, text, ok_text="确定", cancel_text="取消", danger=False):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setModal(True)
+        self.setFixedWidth(360)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        card = Card(self)
+        outer.addWidget(card)
+
+        card.add(Title(title, 14))
+        card.add(Caption(text))
+
+        row = QHBoxLayout()
+        row.setSpacing(PAD_MD)
+        row.addStretch()
+        if cancel_text:
+            cancel_btn = SecondaryBtn(cancel_text)
+            cancel_btn.clicked.connect(self.reject)
+            row.addWidget(cancel_btn)
+        ok_btn = DangerBtn(ok_text) if danger else PrimaryBtn(ok_text)
+        ok_btn.clicked.connect(self.accept)
+        row.addWidget(ok_btn)
+        card.add_layout(row)
+
+    @staticmethod
+    def confirm(parent, title, text, ok_text="确定", cancel_text="取消", danger=False) -> bool:
+        return ConfirmDialog(parent, title, text, ok_text, cancel_text, danger).exec() == QDialog.Accepted
 
 
 class _TipDismissFilter(QObject):

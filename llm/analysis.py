@@ -30,6 +30,7 @@ from llm.prompts import (
     SCENARIO_EXTRACTION_SYSTEM,
 )
 from report.generator import SimulationReport
+from report.timeline import build_timeline_entries
 
 # 传给 LLM 的文档全文上限
 MAX_DOC_CHARS = 30000
@@ -96,8 +97,6 @@ def analyze_evolution(
     report 为 SimulationReport，rounds 为 WorldState 列表；失败抛异常，
     调用方降级为纯公式输出。
     """
-    from report.timeline import build_timeline_entries  # 延迟导入避免环
-
     timeline = build_timeline_entries(rounds or [])
     timeline_lines = []
     for entry in timeline[:40]:

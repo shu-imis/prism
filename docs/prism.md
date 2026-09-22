@@ -271,6 +271,7 @@ prism/
 │   ├── agent.py                  # 行为体数据类 + 模板
 │   ├── agent_factory.py          # 行为体工厂
 │   ├── action_feed.py            # 行动信息流（行为体互动）
+│   ├── constants.py              # 词表常量（指标 / 行动类型 / 节点类型）
 │   ├── document_importer.py      # 文档导入 + 分块
 │   ├── scenario_parser.py        # 场景解析
 │   ├── simulation_engine.py      # 仿真引擎（主循环 + LLM 集成）
@@ -295,7 +296,8 @@ prism/
 │   ├── test_llm_config.py        # LLM 客户端与厂商配置
 │   ├── test_core_modules.py      # 核心模块测试
 │   ├── test_repositories.py      # 数据库 Repository 测试
-│   └── test_reporting.py         # 报告生成与导出测试
+│   ├── test_reporting.py         # 报告生成与导出测试
+│   └── test_ui_pages.py          # UI 页面逻辑测试
 └── docs/
     ├── prism.md                  # 本文档
     └── roadmap.md                # 路线图

@@ -4,11 +4,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from ui.styles import *
-from ui.widgets import Title, Caption, PrimaryBtn, PopupMenu, StatusDot
-from db.models import ProjectRepository
-
-_STATUS_COLORS = STATUS_COLORS
-_STATUS_LABELS = STATUS_LABELS
+from ui.widgets import Title, Caption, ConfirmDialog, PrimaryBtn, PopupMenu, StatusDot
+from db.models import ProjectRepository, is_valid_json
 
 
 class HomePage(QWidget):
@@ -96,16 +93,16 @@ class HomePage(QWidget):
             btn.setFixedSize(240, 140)
             btn.clicked.connect(lambda checked, pid=proj.id: self.open_project.emit(pid))
             btn.setContextMenuPolicy(Qt.CustomContextMenu)
-            btn.customContextMenuRequested.connect(lambda pos, b=btn, pid=proj.id: self._on_context_menu(b, pos, pid))
+            btn.customContextMenuRequested.connect(lambda pos, b=btn, pid=proj.id, name=proj.name: self._on_context_menu(b, pos, pid, name))
 
             card_layout = QVBoxLayout(btn)
             card_layout.setContentsMargins(PAD_MD, PAD_MD, PAD_MD, PAD_MD)
             card_layout.setSpacing(PAD_XS)
 
             sr = QHBoxLayout()
-            sr.addWidget(StatusDot(_STATUS_COLORS.get(proj.status, TEXT_MUTED)))
-            sl = QLabel(_STATUS_LABELS.get(proj.status, proj.status))
-            sl.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {_STATUS_COLORS.get(proj.status, TEXT_MUTED)};")
+            sr.addWidget(StatusDot(STATUS_COLORS.get(proj.status, TEXT_MUTED)))
+            sl = QLabel(STATUS_LABELS.get(proj.status, proj.status))
+            sl.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {STATUS_COLORS.get(proj.status, TEXT_MUTED)};")
             sr.addWidget(sl)
             sr.addStretch()
             card_layout.addLayout(sr)
@@ -118,6 +115,11 @@ class HomePage(QWidget):
             industry = proj.scenario.get("industry", "")
             if industry:
                 card_layout.addWidget(Caption(industry))
+
+            if not is_valid_json(proj.scenario_json):
+                warn = Caption("数据异常：场景信息已损坏")
+                warn.setStyleSheet(f"color: {COLOR_RED};")
+                card_layout.addWidget(warn)
 
             card_layout.addStretch()
 
@@ -144,7 +146,19 @@ class HomePage(QWidget):
         self._current_cols = self._columns()
         self.refresh()
 
-    def _on_context_menu(self, btn, pos, pid):
+    def _on_context_menu(self, btn, pos, pid, name):
         menu = PopupMenu(self)
-        menu.add_action("删除", lambda: (self._repo.soft_delete(pid), self.refresh()))
+        menu.add_action("删除", lambda: self._confirm_delete(pid, name))
         menu.popup(btn.mapToGlobal(pos))
+
+    def _confirm_delete(self, pid, name):
+        # 软删除在应用内无恢复入口，且级联删除仿真轮次与报告，需二次确认
+        if ConfirmDialog.confirm(
+            self,
+            "删除项目",
+            f"确定删除项目「{name}」吗？\n其全部仿真轮次、报告与知识库将一并删除，且无法在应用内恢复。",
+            ok_text="删除",
+            danger=True,
+        ):
+            self._repo.soft_delete(pid)
+            self.refresh()

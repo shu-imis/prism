@@ -90,7 +90,6 @@ class SimulationState:
 
     config: SimulationConfig = field(default_factory=SimulationConfig)
     status: SimStatus = SimStatus.IDLE
-    current_round: int = 0
     total_rounds: int = 0
     agents: list[Agent] = field(default_factory=list)
     scenario: Scenario | None = None
@@ -288,7 +287,7 @@ class SimulationEngine:
 
             turns: list[AgentTurn] = []
             # 手动管理 executor：with 退出即 shutdown(wait=True)，会让超时未完成的
-            # LLM 调用阻塞整轮，round_timeout 形同虚设；改为不等待并取消排队任务
+            # LLM 调用阻塞整轮，round_timeout 形同虚设；故退出时不等待，直接取消排队任务
             executor = ThreadPoolExecutor(max_workers=len(active_agents))
             try:
                 future_to_agent = {
@@ -370,7 +369,7 @@ class SimulationEngine:
                 regulator_risk_flagged=regulator_risk_flagged,
                 demand_surge_detected=demand_surge_detected,
             )
-            self._apply_events(next_state, agents, events)
+            self._apply_events(next_state, events)
             self._apply_bullwhip_effect(agents)
 
             # 本轮行动写入共享信息流，供后续轮次的行为体观察（同步更新语义：
@@ -735,7 +734,7 @@ class SimulationEngine:
             node_states=node_states,
         )
 
-    def _apply_events(self, state: WorldState, agents: list[Agent], events: list[Any]) -> None:
+    def _apply_events(self, state: WorldState, events: list[Any]) -> None:
         state.key_events = events
         if state.node_states:
             self._apply_events_to_node_states(state.node_states, events)
@@ -872,7 +871,7 @@ class SimulationEngine:
                 agent.capacity = clamp(agent.capacity - 0.03, 0.3, 1.5)
 
     def _load_persisted_rounds(self) -> list[WorldState]:
-        """从 simulation_rounds 表重建完整轮次历史（检查点不再内嵌全部快照）。"""
+        """从 simulation_rounds 表重建完整轮次历史。"""
         repo = self.state.round_repository
         simulation_id = self._simulation_record_id()
         if not repo or simulation_id is None:

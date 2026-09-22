@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -140,8 +141,13 @@ def _machine_secret() -> bytes | None:
     return None
 
 
+@lru_cache(maxsize=1)
 def _fernet() -> Any | None:
-    """由本机特征派生 Fernet 实例；特征或 cryptography 不可用返回 None。"""
+    """由本机特征派生 Fernet 实例；特征或 cryptography 不可用返回 None。
+
+    进程内缓存：ioreg / winreg 查询与 PBKDF2 密钥派生均有同步开销，
+    调用方运行在 UI 线程。
+    """
     secret = _machine_secret()
     if secret is None:
         return None

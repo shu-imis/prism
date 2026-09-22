@@ -17,19 +17,13 @@ class Agent:
     name: str
     role: str                              # 角色标签
     decision_stance: str                   # 决策倾向：aggressive/cautious/cooperative/defensive
-    base_stance: str                       # 初始倾向（用于复位）
+    base_stance: str                       # 初始倾向（配置原值，不随仿真推进变化）
     influence: float                       # 单次决策对世界状态的影响力权重
     activity: float                        # 每轮被激活的概率（0~1）
     pressure: float = 0.0                  # 当前压力水平（0~1）
     capacity: float = 1.0                  # 产能利用率（0~1）
     active_cycles: list[int] = field(default_factory=list)  # 活跃周期
     profile: str = ""                      # 角色画像（System Prompt）
-
-    def reset(self) -> None:
-        """复位到初始倾向和状态"""
-        self.decision_stance = self.base_stance
-        self.pressure = 0.0
-        self.capacity = 1.0
 
     def to_dict(self) -> dict:
         return {

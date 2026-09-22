@@ -79,62 +79,7 @@ git push origin v0.1.0
 
 ## 项目结构
 
-```
-prism/
-├── main.py
-├── config.py
-├── requirements.txt
-├── requirements-dev.txt
-├── assets/
-│   ├── fonts/                    # 内嵌字体
-│   └── icons/                    # 应用图标
-├── ui/                           # PySide6 界面
-│   ├── main_window.py
-│   ├── title_bar.py              # 自定义标题栏（macOS / Windows）
-│   ├── home_page.py
-│   ├── settings_page.py          # 设置 — 全局 LLM 配置与仿真参数
-│   ├── process_page.py           # 4 步工作流协调
-│   ├── event_page.py             # 供应链搭建（Step 01）
-│   ├── persona_page.py           # 行为体性格配置（Step 02）
-│   ├── simulation_page.py        # 仿真运行（Step 03）
-│   ├── result_page.py            # 演化分析（Step 04）
-│   ├── ai_worker.py              # 通用 AI 调用工作线程
-│   ├── charts.py                 # 折线图 / 雷达图 / 泳道图组件
-│   ├── widgets.py
-│   └── styles.py
-├── core/                         # 仿真引擎 + 行为体 + 事件
-│   ├── agent.py
-│   ├── agent_factory.py
-│   ├── action_feed.py            # 行动信息流（行为体互动）
-│   ├── document_importer.py
-│   ├── scenario_parser.py
-│   ├── simulation_engine.py
-│   ├── text_utils.py             # 发言标点规范化
-│   ├── world_state.py
-│   └── events.py
-├── llm/                          # LLM 客户端 + 配置 + 业务调用 + Prompt
-│   ├── client.py
-│   ├── config.py
-│   ├── analysis.py
-│   └── prompts.py
-├── report/                       # 报告生成 + 导出 + 时间线
-│   ├── generator.py
-│   ├── timeline.py
-│   └── exporter.py
-├── db/                           # SQLite 数据访问
-│   ├── database.py
-│   └── models.py
-├── tests/                        # 按主题拆分的后端测试
-│   ├── helpers.py                # 共享测试助手（假 LLM、行为体、钥匙串）
-│   ├── test_simulation_engine.py # 仿真引擎与检查点/恢复
-│   ├── test_llm_config.py        # LLM 客户端与厂商配置
-│   ├── test_core_modules.py      # 核心模块（事件/信息流/导入）
-│   ├── test_repositories.py      # 数据库 Repository
-│   └── test_reporting.py         # 报告生成与导出
-└── docs/
-    ├── prism.md                  # 完整项目文档
-    └── roadmap.md                # 路线图
-```
+见 [docs/prism.md](docs/prism.md) 第 7 节「项目结构」。
 
 ## 文档
 

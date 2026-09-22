@@ -12,6 +12,8 @@ from db.models import (
     SimulationRoundRepository,
     CheckpointRepository,
     KnowledgeRepository,
+    from_json,
+    is_valid_json,
 )
 
 
@@ -177,6 +179,40 @@ class RepositoryTests(unittest.TestCase):
             self.assertEqual(len(reports), 1)
             self.assertEqual(reports[0].markdown, "v2")
             self.assertEqual(reports[0].summary["n"], 2)
+            db.close()
+
+
+class JsonHelpersTests(unittest.TestCase):
+    def test_from_json_corrupt_falls_back_to_default(self) -> None:
+        """损坏的 JSON 文本降级为默认值而不是抛异常。"""
+        self.assertEqual(from_json("{bad json", {}), {})
+        self.assertEqual(from_json("", {"a": 1}), {"a": 1})
+        self.assertEqual(from_json(None, []), [])
+        self.assertEqual(from_json('{"k": 2}', {}), {"k": 2})
+
+    def test_is_valid_json_detects_corruption(self) -> None:
+        """is_valid_json 区分正常、空值与损坏文本，供 UI 标记数据异常。"""
+        self.assertTrue(is_valid_json('{"k": 1}'))
+        self.assertTrue(is_valid_json(""))
+        self.assertTrue(is_valid_json(None))
+        self.assertFalse(is_valid_json("{bad json"))
+
+    def test_corrupt_scenario_json_detectable_on_project(self) -> None:
+        """数据库中损坏的 scenario_json：scenario 降级为空 dict，且可被检测。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(Path(tmp) / "prism.db")
+            db.migrate()
+            repo = ProjectRepository(db)
+            project = repo.create("Demo", {"industry": "electronics"})
+            with db.transaction() as conn:
+                conn.execute(
+                    "UPDATE projects SET scenario_json = ? WHERE id = ?",
+                    ("{corrupted", project.id),
+                )
+
+            broken = repo.get_by_id(project.id)
+            self.assertEqual(broken.scenario, {})
+            self.assertFalse(is_valid_json(broken.scenario_json))
             db.close()
 
 
