@@ -251,7 +251,7 @@ class SettingsPage(QWidget):
             self,
             lambda: check_vendor(settings),
             lambda _reply: self._on_test_done("连接成功，配置可用", False),
-            lambda err: self._on_test_done(f"连接失败：{err}", True),
+            lambda err: self._on_test_done(f"连接失败：{err[:120]}", True),
         )
 
     def _on_test_done(self, msg: str, is_error: bool):

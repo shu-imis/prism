@@ -26,6 +26,12 @@
 - [ ] 自定义供应链节点参数编辑
 - [ ] 仿真回放与单步调试
 - [ ] 仿真后行为体采访（MiroFish INTERVIEW 式）
+- [ ] NodeEditor 节点类型选择器改用 SegmentedControl
+- [ ] 状态显示组件统一（StatusDot / Caption 等多种写法收拢）
+- [ ] 主仿真记录查询下沉到 Repository 层（现散落 6 处）
+- [ ] db 层 get_by_id 语义统一（返回 None vs 抛 KeyError）
+- [ ] WorldState.simulated_hour 与 round 合并评估（涉及 DB schema 迁移）
+- [ ] 各页 AI 按钮启停逻辑抽公共 helper
 
 ---
 
@@ -44,4 +50,5 @@
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| v0.1.1 | 2026-09-22 | 稳定性与体验修复：项目数据损坏时降级为默认值并在卡片标记异常；删除项目二次确认（新增 ConfirmDialog 自绘弹窗）；导出失败与启动版本读取异常兜底；密钥派生进程内缓存；报错文案中文化与截断 |
 | v0.1.0 | 2026-08-18 | 供应链决策推演全新起点：单世界互动仿真（行动信息流、观察层、受限行动空间，MiroFish 式跨轮反应链）；Step1-4 全流程界面（文档分析、行为体配置、种子事件、演化分析与 AI 综合分析）；7 家厂商 LLM 预设、OS 钥匙串加密存储与全链路 AI 集成；SQLite 持久化与检查点恢复；Markdown 报告导出；PyInstaller 打包 macOS / Windows 安装包 |

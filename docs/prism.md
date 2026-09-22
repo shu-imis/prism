@@ -1,4 +1,4 @@
-# Prism 项目规划
+# Prism 项目文档
 
 ## 1. 项目概述
 
@@ -82,7 +82,7 @@ Prism 采用 Sigma 风格亮色极简设计，参考 Sigma 相机品牌的设计
 - 危险按钮：透明底 + 红色边框
 - 输入框：浅灰背景（#F5F5F0），1px 边框
 - 进度条：4px 高度，无圆角
-- 无系统弹窗：所有错误提示使用页面内红色标签
+- 无系统弹窗：模态确认用自绘 ConfirmDialog，轻量提示用页面内红色标签
 
 ### 3.5 工作区设计
 ```
@@ -144,7 +144,7 @@ Prism 为单体桌面应用，基于 PySide6 实现全部交互与业务逻辑�
 ### 5.1 项目列表
 - 新建推演项目 / 打开历史项目
 - 项目卡片：名称、状态（草稿/运行中/已中断/已完成）、创建日期
-- 右键删除（软删除）
+- 右键删除（二次确认后软删除）
 
 ### 5.2 供应链搭建（Step 01）
 - 供应链名称、行业类型（下拉 + 自定义）
@@ -271,6 +271,7 @@ prism/
 │   ├── agent.py                  # 行为体数据类 + 模板
 │   ├── agent_factory.py          # 行为体工厂
 │   ├── action_feed.py            # 行动信息流（行为体互动）
+│   ├── constants.py              # 词表常量（指标 / 行动类型 / 节点类型）
 │   ├── document_importer.py      # 文档导入 + 分块
 │   ├── scenario_parser.py        # 场景解析
 │   ├── simulation_engine.py      # 仿真引擎（主循环 + LLM 集成）
@@ -295,7 +296,8 @@ prism/
 │   ├── test_llm_config.py        # LLM 客户端与厂商配置
 │   ├── test_core_modules.py      # 核心模块测试
 │   ├── test_repositories.py      # 数据库 Repository 测试
-│   └── test_reporting.py         # 报告生成与导出测试
+│   ├── test_reporting.py         # 报告生成与导出测试
+│   └── test_ui_pages.py          # UI 页面逻辑测试
 └── docs/
     ├── prism.md                  # 本文档
     └── roadmap.md                # 路线图
@@ -317,7 +319,7 @@ prism/
 
 ### 8.3 数据完整性
 - SQLite WAL 模式
-- 项目软删除（deleted_at），支持恢复
+- 项目软删除（deleted_at），应用内无恢复入口
 
 ---
 

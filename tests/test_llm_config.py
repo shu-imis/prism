@@ -17,6 +17,13 @@ from tests.helpers import FakeKeyring, make_json_client
 class LLMConfigTests(unittest.TestCase):
     """全链路 AI 集成：全局配置、文档抽取、行为体生成。"""
 
+    def setUp(self) -> None:
+        # _fernet 有进程内缓存，需清空让 _machine_secret 的 mock 生效
+        llm_config._fernet.cache_clear()
+
+    def tearDown(self) -> None:
+        llm_config._fernet.cache_clear()
+
     def test_llm_json_fallback(self) -> None:
         """验证 LLM 多厂商 fallback 和 JSON 修复解析。"""
         calls: list[str] = []

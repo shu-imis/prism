@@ -30,7 +30,7 @@ from report.generator import ReportGenerator, SimulationReport
 from ui.ai_worker import run_ai_task
 from ui.charts import MetricsChart, RadarChart, SwimlaneGrid
 from ui.styles import *
-from ui.widgets import Caption, Card, GhostBtn, SecondaryBtn, Title, clear_layout
+from ui.widgets import Caption, Card, ConfirmDialog, GhostBtn, SecondaryBtn, Title, clear_layout
 
 _METRIC_COLUMNS = ("周期", *METRICS.values())
 
@@ -488,8 +488,6 @@ class ResultPage(QWidget):
                 )
                 self._table_grid.addWidget(cell, row, col)
 
-    # --- 布局工具 ---
-
     # --- 导出 ---
 
     def _export_md(self):
@@ -498,8 +496,14 @@ class ResultPage(QWidget):
         path, _ = QFileDialog.getSaveFileName(
             self, "导出 Markdown", "report.md", "Markdown(*.md)",
         )
-        if path:
+        if not path:
+            return
+        try:
             ReportExporter.export_markdown(self._report, path, self._rounds)
+        except OSError as e:
+            ConfirmDialog.confirm(
+                self, "导出失败", f"无法写入文件：\n{e}", ok_text="知道了", cancel_text="",
+            )
 
 
 def _format_delta(delta: float, fmt: str) -> str:

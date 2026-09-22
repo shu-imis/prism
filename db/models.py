@@ -16,10 +16,24 @@ def to_json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, sort_keys=True)
 
 
+_PARSE_FAILED = object()  # from_json 的解析失败哨兵，供 is_valid_json 复用
+
+
 def from_json(text: str | None, default: Any) -> Any:
     if not text:
         return default
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except ValueError:
+        # 数据损坏（如写入中断）时降级为默认值
+        return default
+
+
+def is_valid_json(text: str | None) -> bool:
+    """JSON 是否可解析（空值视为可解析），供 UI 标记损坏数据。"""
+    if not text:
+        return True
+    return from_json(text, _PARSE_FAILED) is not _PARSE_FAILED
 
 
 # 单世界仿真在 simulations 表中的持久化锚点名称
@@ -41,16 +55,6 @@ class Project:
     @property
     def scenario(self) -> dict[str, Any]:
         return from_json(self.scenario_json, {})
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "name": self.name,
-            "status": self.status,
-            "scenario": self.scenario,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-        }
 
 
 @dataclass(frozen=True)
@@ -164,23 +168,6 @@ class ProjectRepository:
             conn.execute(
                 "UPDATE projects SET deleted_at = datetime('now') WHERE id = ?",
                 (project_id,),
-            )
-
-    def update(self, project: Project) -> None:
-        with self.db.transaction() as conn:
-            conn.execute(
-                """
-                UPDATE projects
-                SET name = ?, status = ?, scenario_json = ?,
-                    updated_at = datetime('now')
-                WHERE id = ?
-                """,
-                (
-                    project.name,
-                    project.status,
-                    project.scenario_json,
-                    project.id,
-                ),
             )
 
     def update_scenario(

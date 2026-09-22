@@ -65,10 +65,14 @@ from db.database import Database
 
 # 版本号从 __init__.py 读取：冻结时该文件由 prism.spec 打入 bundle，
 # 且仓库根目录自身在 PyInstaller 下无法作为 prism 包 import
-_m = re.search(
-    r'__version__\s*=\s*["\']([^"\']+)["\']',
-    (_RESOURCE_ROOT / "__init__.py").read_text(encoding="utf-8"),
-)
+_m = None
+try:
+    _m = re.search(
+        r'__version__\s*=\s*["\']([^"\']+)["\']',
+        (_RESOURCE_ROOT / "__init__.py").read_text(encoding="utf-8"),
+    )
+except OSError:
+    pass
 __version__ = _m.group(1) if _m else "0.0.0"
 
 def main():
