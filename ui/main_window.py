@@ -3,9 +3,9 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QPushButton, QLabel,
     QStackedWidget, QHBoxLayout, QButtonGroup, QGraphicsDropShadowEffect,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
-from ui.styles import stylesheet, SIDEBAR_W
+from ui.styles import stylesheet, SIDEBAR_W, TEXT_INACTIVE, BG_INACTIVE_CHECKED, TEXT_MUTED
 from ui.home_page import HomePage
 from ui.process_page import ProcessPage
 from ui.settings_page import SettingsPage
@@ -29,7 +29,18 @@ class MainWindow(QMainWindow):
 
     def changeEvent(self, event):
         if event.type() == event.Type.ActivationChange:
-            self._title_bar.set_active(self.isActiveWindow())
+            active = self.isActiveWindow()
+            self._title_bar.set_active(active)
+            # 失焦时侧栏随标题栏一起收敛（选中态减淡、文字变灰）
+            self._sidebar.setStyleSheet("" if active else (
+                f"#sidebar QPushButton{{color:{TEXT_INACTIVE};}}"
+                f"#sidebar QPushButton:checked{{background:{BG_INACTIVE_CHECKED};color:{TEXT_MUTED};}}"
+                f"#sidebar QLabel#brand{{color:{TEXT_MUTED};}}"
+            ))
+            # 原生窗口失焦时阴影收敛，自绘阴影对齐这一行为
+            self._shadow.setBlurRadius(24 if active else 12)
+            self._shadow.setOffset(0, 4 if active else 2)
+            self._shadow.setColor(QColor(0, 0, 0, 60 if active else 28))
         super().changeEvent(event)
 
     def _setup_window(self):
@@ -63,6 +74,7 @@ class MainWindow(QMainWindow):
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(SIDEBAR_W)
+        self._sidebar = sidebar
         sl = QVBoxLayout(sidebar)
         sl.setContentsMargins(0, 0, 0, 0)
         sl.setSpacing(0)
@@ -108,20 +120,29 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(body, 1)
         shadow_layout.addWidget(container)
 
-        # ---- 投影效果（弥散投影，与弹出菜单同层次） ----
-        drop_shadow = QGraphicsDropShadowEffect(container)
-        drop_shadow.setBlurRadius(24)
-        drop_shadow.setOffset(0, 4)
-        drop_shadow.setColor(QColor(0, 0, 0, 60))
-        container.setGraphicsEffect(drop_shadow)
+        # ---- 投影效果（弥散投影，与弹出菜单同层次；失焦时收敛，见 changeEvent） ----
+        self._shadow = QGraphicsDropShadowEffect(container)
+        self._shadow.setBlurRadius(24)
+        self._shadow.setOffset(0, 4)
+        self._shadow.setColor(QColor(0, 0, 0, 60))
+        container.setGraphicsEffect(self._shadow)
 
         self._go(0)
 
     def _toggle_maximize(self):
+        # 投影在动画期间逐帧重算高斯模糊会导致卡顿，切换时临时挂起
+        self._shadow.setEnabled(False)
         if self.isMaximized():
             self.showNormal()
         else:
             self.showMaximized()
+        QTimer.singleShot(250, self._restore_shadow)
+
+    def _restore_shadow(self):
+        try:
+            self._shadow.setEnabled(True)
+        except RuntimeError:
+            pass  # 窗口已在动画期间关闭，effect 随容器销毁
 
     def _go(self, idx: int):
         self._stack.setCurrentIndex(idx)

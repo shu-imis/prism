@@ -6,8 +6,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QEvent, QObject, QPoint, QRectF, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter
 from ui.styles import (
-    TEXT_PRIMARY, TEXT_MUTED, TEXT_ON_DARK, ACCENT, BG_INPUT, BG_SURFACE, BG_HOVER,
-    BORDER, BTN_H, PAD_LG, PAD_MD,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_ON_DARK, ACCENT, BG_INPUT, BG_SURFACE,
+    BG_HOVER, BORDER, COLOR_RED, BTN_H, PAD_LG, PAD_MD, PAD_XL,
 )
 
 
@@ -145,10 +145,10 @@ class Caption(QLabel):
 
 
 class Divider(QFrame):
-    def __init__(self, parent=None):
+    def __init__(self, vertical=False, parent=None):
         super().__init__(parent)
-        self.setFrameShape(QFrame.HLine)
-        self.setFixedHeight(1)
+        self.setFrameShape(QFrame.VLine if vertical else QFrame.HLine)
+        self.setFixedWidth(1) if vertical else self.setFixedHeight(1)
         self.setStyleSheet(f"background: {BORDER}; border: none;")
 
 
@@ -202,36 +202,86 @@ class PopupMenu(QFrame):
 class ConfirmDialog(QDialog):
     """应用内确认弹窗 — 替代 QMessageBox，与自绘组件风格一致。
 
-    无边框卡片：标题 + 说明 + 取消/确认按钮。danger=True 时确认按钮
-    用 DangerBtn（红色警示）；cancel_text 传空串则只留确认按钮（纯通知）。
-    Esc 或点取消均为拒绝。
+    结构：内容区（标题 + 说明）+ 1px 分隔线 + 通栏按钮条。确认与通知
+    两种形态结构一致；danger=True 时确认按钮红字警示。Esc 或点取消均为拒绝。
+    """
+
+    _BTN_QSS = f"""
+    QPushButton {{ border: none; background: transparent; font-size: 13px; padding: 10px 0; color: {TEXT_SECONDARY}; }}
+    QPushButton:hover {{ background: {BG_HOVER}; }}
     """
 
     def __init__(self, parent, title, text, ok_text="确定", cancel_text="取消", danger=False):
         super().__init__(parent)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setModal(True)
-        self.setFixedWidth(360)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        card = Card(self)
+
+        card = QFrame(self)
+        card.setObjectName("card")
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setFixedWidth(400)
         outer.addWidget(card)
+        ly = QVBoxLayout(card)
+        ly.setContentsMargins(0, 0, 0, 0)
+        ly.setSpacing(0)
 
-        card.add(Title(title, 14))
-        card.add(Caption(text))
+        body = QVBoxLayout()
+        body.setContentsMargins(PAD_XL, PAD_XL, PAD_XL, PAD_XL)
+        body.setSpacing(PAD_MD)
+        title_label = QLabel(title)
+        tf = QFont()
+        tf.setPointSize(15)
+        tf.setBold(True)
+        title_label.setFont(tf)
+        title_label.setStyleSheet(f"color: {TEXT_PRIMARY};")
+        body.addWidget(title_label)
+        body_label = QLabel(text)
+        body_label.setWordWrap(True)
+        bf = QFont()
+        bf.setPointSize(13)
+        body_label.setFont(bf)
+        body_label.setStyleSheet(f"color: {TEXT_SECONDARY};")
+        body.addWidget(body_label)
+        ly.addLayout(body)
 
-        row = QHBoxLayout()
-        row.setSpacing(PAD_MD)
-        row.addStretch()
+        ly.addWidget(Divider())
+
+        btns = QHBoxLayout()
+        btns.setContentsMargins(0, 0, 0, 0)
+        btns.setSpacing(0)
         if cancel_text:
-            cancel_btn = SecondaryBtn(cancel_text)
+            cancel_btn = QPushButton(cancel_text)
+            cancel_btn.setCursor(Qt.PointingHandCursor)
+            cancel_btn.setStyleSheet(self._BTN_QSS)
             cancel_btn.clicked.connect(self.reject)
-            row.addWidget(cancel_btn)
-        ok_btn = DangerBtn(ok_text) if danger else PrimaryBtn(ok_text)
+            btns.addWidget(cancel_btn, 1)
+            btns.addWidget(Divider(vertical=True))
+        ok_btn = QPushButton(ok_text)
+        ok_btn.setCursor(Qt.PointingHandCursor)
+        ok_color = COLOR_RED if danger else TEXT_PRIMARY
+        ok_btn.setStyleSheet(
+            self._BTN_QSS + f"QPushButton {{ font-weight: 600; color: {ok_color}; }}"
+        )
         ok_btn.clicked.connect(self.accept)
-        row.addWidget(ok_btn)
-        card.add_layout(row)
+        btns.addWidget(ok_btn, 1)
+        ly.addLayout(btns)
+
+    def showEvent(self, event):
+        """显式定位到窗口中心（Qt 默认按父控件居中，受布局时序影响）。"""
+        super().showEvent(event)
+        self.adjustSize()
+        parent = self.parentWidget()
+        window = parent.window() if parent is not None else None
+        if window is not None:
+            wg = window.frameGeometry()
+            fg = self.frameGeometry()
+            self.move(
+                wg.x() + (wg.width() - fg.width()) // 2,
+                wg.y() + (wg.height() - fg.height()) // 2,
+            )
 
     @staticmethod
     def confirm(parent, title, text, ok_text="确定", cancel_text="取消", danger=False) -> bool:
