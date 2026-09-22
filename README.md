@@ -77,14 +77,10 @@ git push origin v0.1.0
 | 文档解析 | 纯文本读取（Markdown / TXT） |
 | 配置管理 | python-dotenv + keyring |
 
-## 项目结构
-
-见 [docs/prism.md](docs/prism.md) 第 7 节「项目结构」。
-
 ## 文档
 
-- [项目文档](docs/prism.md) — 完整的产品定义、设计系统、仿真模型
-- [路线图](docs/roadmap.md) — 版本规划与待实现功能
+- [docs/prism.md](docs/prism.md) — 项目完整文档
+- [docs/roadmap.md](docs/roadmap.md) — 版本规划与变更记录
 
 ## 许可
 
