@@ -264,7 +264,7 @@ class SwimlaneGrid(QWidget):
         mono.setPixelSize(9)
 
         # 表头：周期序号（有关键事件的周期标红）
-        # 格宽自适应：周期列均分可用宽度（24~56px），任意周期数都不溢出
+        # 格宽自适应：周期列均分可用宽度（下限 24px），任意周期数都不溢出
         for col, state in enumerate(rounds, start=1):
             has_event = state.round in event_rounds
             header = TipLabel(

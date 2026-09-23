@@ -11,7 +11,7 @@ from typing import Iterable
 
 from core.constants import METRICS
 
-# 环境干预（种子事件）写入信息流时的行动类型键
+# 种子事件等环境干预写入信息流时的行动类型键
 SEED_ACTION = "seed"
 
 _METRIC_LABELS = {

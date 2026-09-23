@@ -16,7 +16,7 @@ from core.agent_factory import AgentFactory
 from db.models import ProjectRepository, invalidate_simulation_results
 from llm.analysis import generate_agent_config
 from llm.config import build_llm_client
-from ui.ai_worker import run_ai_task
+from ui.ai_worker import run_ai_task_with_button
 from ui.styles import *
 from ui.widgets import (
     Caption,
@@ -239,22 +239,17 @@ class PersonaPage(QWidget):
         if client is None:
             self.log("未找到可用的 LLM 配置，请到左侧「设置」页填写 API Key", is_error=True)
             return
-        self._ai_btn.setEnabled(False)
-        self._ai_btn.setText("AI 生成中…")
         pid = self._pid
-        run_ai_task(
+        run_ai_task_with_button(
             self,
+            self._ai_btn,
+            "AI 生成中…",
             lambda: generate_agent_config(client, scenario),
             lambda result: self._on_ai_config(result, pid),
             self._on_ai_error,
         )
 
-    def _reset_ai_btn(self):
-        self._ai_btn.setEnabled(True)
-        self._ai_btn.setText("AI 生成行为体配置")
-
     def _on_ai_config(self, result, pid):
-        self._reset_ai_btn()
         # 等待期间用户可能已切换项目：pid 不匹配则忽略结果，避免旧数据填进新页面
         if pid != self._pid:
             return
@@ -263,7 +258,6 @@ class PersonaPage(QWidget):
         self.log("AI 已生成行为体配置与种子事件，请核对后保存")
 
     def _on_ai_error(self, err):
-        self._reset_ai_btn()
         self.log(f"AI 生成失败：{err}", is_error=True)
 
     def reset(self):

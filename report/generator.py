@@ -93,7 +93,7 @@ class SimulationReport:
 
 
 class ReportGenerator:
-    """报告生成器。"""
+    """编排评分、风险与摘要的生成流程。"""
 
     def __init__(self, project_name: str = "", scenario_background: str = ""):
         self.project_name = project_name

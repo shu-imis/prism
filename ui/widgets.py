@@ -155,8 +155,11 @@ class Divider(QFrame):
 class StatusDot(QLabel):
     def __init__(self, color=ACCENT, parent=None):
         super().__init__("●", parent)
-        self.setStyleSheet(f"color: {color}; font-size: 10px;")
+        self.set_color(color)
         self.setFixedSize(12, 12)
+
+    def set_color(self, color):
+        self.setStyleSheet(f"color: {color}; font-size: 10px;")
 
 
 class PopupMenu(QFrame):
@@ -215,6 +218,7 @@ class ConfirmDialog(QDialog):
         super().__init__(parent)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setModal(True)
+        self.setAttribute(Qt.WA_DeleteOnClose)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -325,13 +329,13 @@ class TipLabel(QLabel):
         if tip:
             self.setCursor(Qt.PointingHandCursor)
         # 注意：必须连接 lambda 而非自身绑定方法——Qt 销毁对象时会先清理
-        # "接收者是自身"的连接，self.destroyed.connect(self.method) 不会触发
+        # 「接收者是自身」的连接，self.destroyed.connect(self.method) 不会触发
         self.destroyed.connect(lambda *args, s=self: TipLabel._on_owner_gone(s))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self._tip:
             # accept 阻止事件向父级传播：传播会再次经过全局过滤器，
-            # 被误判为"点击浮层外部"而把刚打开的浮层立即关掉
+            # 被误判为「点击浮层外部」而把刚打开的浮层立即关掉
             event.accept()
             if TipLabel._owner is self:
                 TipLabel.hide_tip()  # 再点一次 = 关闭
@@ -379,7 +383,7 @@ class TipLabel(QLabel):
         popup.move(pos)
         popup.show()
         # 浮层被外部销毁（如应用退出）时清空引用；按身份比对，
-        # 避免"关旧开新"后旧浮层的延迟销毁误清新浮层的引用
+        # 避免「关旧开新」后旧浮层的延迟销毁误清新浮层的引用
         popup.destroyed.connect(lambda *args, p=popup: cls._on_popup_gone(p))
         cls._popup = popup
         cls._owner = owner

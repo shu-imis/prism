@@ -71,7 +71,7 @@ class EventDetector:
         self._overflow_cooldown = 0          # 爆仓事件冷却轮数（避免每轮重复触发）
 
     def to_dict(self) -> dict:
-        """序列化连续计数，供检查点续传（跨断点保持"连续两轮"检测链）。"""
+        """序列化连续计数，供检查点续传（跨断点保持「连续两轮」检测链）。"""
         return {
             "supplier_delay_count": self._supplier_delay_count,
             "regulator_risk_count": self._regulator_risk_count,
@@ -114,7 +114,7 @@ class EventDetector:
             events.append(self._make_event(state, EventType.WAREHOUSE_OVERFLOW))
             self._overflow_cooldown = 2
 
-        # 3. 价格战触发（零售商利润率为负）
+        # 3. 价格战触发
         if retailer_margin_negative and state.profit_margin < 0:
             events.append(self._make_event(state, EventType.PRICE_WAR))
 

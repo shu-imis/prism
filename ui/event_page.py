@@ -30,7 +30,7 @@ from core.scenario_parser import (
 from db.models import KnowledgeRepository, ProjectRepository, invalidate_simulation_results
 from llm.analysis import extract_scenario_from_docs
 from llm.config import build_llm_client
-from ui.ai_worker import run_ai_task
+from ui.ai_worker import run_ai_task_with_button
 from ui.styles import *
 from ui.widgets import (
     Caption,
@@ -43,6 +43,7 @@ from ui.widgets import (
     NumberInput,
     PrimaryBtn,
     SecondaryBtn,
+    SegmentedControl,
     Title,
     clear_layout,
 )
@@ -99,53 +100,10 @@ class NodeEditor(QWidget):
         row1.addWidget(name)
 
         row1.addWidget(QLabel("类型"))
-        type_val = d.get("type", "supplier")
-        selected_type = {"val": type_val}
-        node_type_widgets = []
-        for val, label in NODE_TYPES:
-            lbl = QLabel(label)
-            lbl.setCursor(Qt.PointingHandCursor)
-            lbl.setFixedHeight(BTN_H)
-            lbl.setAlignment(Qt.AlignCenter)
-            lbl.mousePressEvent = (
-                lambda e, v=val, s=selected_type, ws=node_type_widgets:
-                _select_type(v, s, ws)
-            )
-            # 悬停态，与 SegmentedControl 的 QPushButton:hover 一致
-            def _on_enter(l=val, s=selected_type, w=lbl):
-                if s["val"] != l:
-                    w.setStyleSheet(
-                        f"background:{BG_HOVER};color:{TEXT_PRIMARY};"
-                        "border:1px solid " + BORDER + ";padding:2px 9px;font-size:12px;"
-                    )
-            def _on_leave(l=val, s=selected_type, w=lbl):
-                if s["val"] != l:
-                    w.setStyleSheet(
-                        f"background:transparent;color:{TEXT_MUTED};"
-                        f"border:1px solid {BORDER};padding:2px 9px;font-size:12px;"
-                    )
-            lbl.enterEvent = lambda e, fn=_on_enter: fn()
-            lbl.leaveEvent = lambda e, fn=_on_leave: fn()
-            node_type_widgets.append((val, lbl))
-            row1.addWidget(lbl)
+        type_seg = SegmentedControl(NODE_TYPES)
+        type_seg.setValue(d.get("type", "supplier"))
+        row1.addWidget(type_seg)
         row1.addStretch()
-
-        def _select_type(v, s, ws):
-            s["val"] = v
-            for tv, w in ws:
-                if tv == v:
-                    w.setStyleSheet(
-                        f"background:{TEXT_PRIMARY};color:{TEXT_ON_DARK};"
-                        "border:1px solid " + TEXT_PRIMARY + ";font-weight:600;"
-                        "padding:2px 9px;font-size:12px;"
-                    )
-                else:
-                    w.setStyleSheet(
-                        f"background:transparent;color:{TEXT_MUTED};"
-                        f"border:1px solid {BORDER};"
-                        "padding:2px 9px;font-size:12px;"
-                    )
-        _select_type(type_val, selected_type, node_type_widgets)
 
         card.add_layout(row1)
 
@@ -184,7 +142,7 @@ class NodeEditor(QWidget):
         self._nodes.append({
             "card": card,
             "name": name,
-            "type": selected_type,
+            "type": type_seg,
             "inventory": inv,
             "lead_time": lead,
             "capacity": cap,
@@ -213,7 +171,7 @@ class NodeEditor(QWidget):
         for nd in self._nodes:
             result.append({
                 "name": nd["name"].text().strip(),
-                "type": nd["type"]["val"],
+                "type": nd["type"].value(),
                 "inventory": nd["inventory"].value(),
                 "lead_time": nd["lead_time"].value(),
                 "capacity": nd["capacity"].value(),
@@ -379,27 +337,21 @@ class EventPage(QWidget):
         if not files:
             return
         # 大文件读取耗时，放 worker 线程执行避免冻结界面
-        self._import_btn.setEnabled(False)
-        self._import_btn.setText("导入中…")
-        run_ai_task(
+        run_ai_task_with_button(
             self,
+            self._import_btn,
+            "导入中…",
             lambda: import_documents(files),
             self._on_docs_imported,
             self._on_docs_import_error,
         )
 
-    def _reset_import_btn(self):
-        self._import_btn.setEnabled(True)
-        self._import_btn.setText("导入背景文档")
-
     def _on_docs_imported(self, imported):
-        self._reset_import_btn()
         self._imported = imported
         self._render_imported_docs()
         self.log(f"已导入 {len(self._imported)} 个文档")
 
     def _on_docs_import_error(self, err):
-        self._reset_import_btn()
         self.log(f"导入失败：{err}", is_error=True)
 
     def _render_imported_docs(self):
@@ -481,22 +433,17 @@ class EventPage(QWidget):
         if client is None:
             self.log("未找到可用的 LLM 配置，请到左侧「设置」页填写 API Key", is_error=True)
             return
-        self._ai_btn.setEnabled(False)
-        self._ai_btn.setText("AI 分析中…")
         pid = self._pid
-        run_ai_task(
+        run_ai_task_with_button(
             self,
+            self._ai_btn,
+            "AI 分析中…",
             lambda: extract_scenario_from_docs(client, docs_text),
             lambda sc: self._on_ai_scenario(sc, pid),
             self._on_ai_error,
         )
 
-    def _reset_ai_btn(self):
-        self._ai_btn.setEnabled(True)
-        self._ai_btn.setText("AI 分析并自动填写")
-
     def _on_ai_scenario(self, sc, pid):
-        self._reset_ai_btn()
         # 等待期间用户可能已切换项目：pid 不匹配则忽略结果，避免旧数据填进新页面
         if pid != self._pid:
             return
@@ -514,7 +461,6 @@ class EventPage(QWidget):
         self.log("AI 已完成文档分析并自动填写，请核对后保存")
 
     def _on_ai_error(self, err):
-        self._reset_ai_btn()
         self.log(f"AI 分析失败：{err}", is_error=True)
 
     def _save(self):

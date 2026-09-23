@@ -49,28 +49,28 @@ class MainWindow(QMainWindow):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
     def _build(self):
-        # ---- 投影包裹层：10px 透明边距供阴影伸展 ----
+        # --- 投影包裹层：10px 透明边距供阴影伸展 ---
         shadow = QWidget(self)
         self.setCentralWidget(shadow)
         shadow_layout = QVBoxLayout(shadow)
         shadow_layout.setContentsMargins(10, 10, 10, 10)
         shadow_layout.setSpacing(0)
 
-        # ---- 整体容器 ----
+        # --- 整体容器 ---
         container = QWidget()
         container.setObjectName("windowBody")
         main_layout = QVBoxLayout(container)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # ---- 自定义标题栏 ----
+        # --- 自定义标题栏 ---
         self._title_bar = TitleBar()
         self._title_bar.minimized.connect(self.showMinimized)
         self._title_bar.maximized.connect(self._toggle_maximize)
         self._title_bar.closed.connect(self.close)
         main_layout.addWidget(self._title_bar)
 
-        # ---- 侧边栏 + 内容区 ----
+        # --- 侧边栏 + 内容区 ---
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(SIDEBAR_W)
@@ -99,7 +99,7 @@ class MainWindow(QMainWindow):
 
         sl.addStretch()
 
-        # ---- 内容区 ----
+        # --- 内容区 ---
         self._stack = QStackedWidget()
         self._home = HomePage()
         self._process = ProcessPage()
@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(body, 1)
         shadow_layout.addWidget(container)
 
-        # ---- 投影效果（弥散投影，与弹出菜单同层次；失焦时收敛，见 changeEvent） ----
+        # --- 投影效果（弥散投影，与弹出菜单同层次；失焦时收敛，见 changeEvent） ---
         self._shadow = QGraphicsDropShadowEffect(container)
         self._shadow.setBlurRadius(24)
         self._shadow.setOffset(0, 4)

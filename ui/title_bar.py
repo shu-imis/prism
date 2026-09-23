@@ -29,7 +29,7 @@ else:
 
 
 class _MacTraffic(QPushButton):
-    """macOS 红绿灯按钮 — 悬停组内任一颗时整组显示符号（与系统一致）"""
+    """macOS 红绿灯按钮 — 悬停组内任一颗时整组显示符号"""
 
     def __init__(self, color, symbol, parent=None):
         super().__init__(parent)
@@ -63,7 +63,7 @@ class _MacTraffic(QPushButton):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        # 悬停时按钮"唤醒"为激活色，其余界面保持失焦灰
+        # 悬停时按钮「唤醒」为激活色，其余界面保持失焦灰
         fill = QColor(self._color if (self._active or self._group_hover) else "#D0D0D0")
         if self.isDown():
             fill = fill.darker(120)  # 按压加深 20%，对齐原生
@@ -125,7 +125,7 @@ class _WinButton(QPushButton):
         elif self._hover or self.isDown():
             p.fillRect(self.rect(), QColor("#DBDBDB") if self.isDown() else QColor("#E5E5E5"))
 
-        # 符号（悬停/按下时"唤醒"为激活色，其余界面保持失焦灰）
+        # 符号（悬停/按下时「唤醒」为激活色，其余界面保持失焦灰）
         if self._hover and self._kind == "close":
             pen_color = QColor(TEXT_ON_DARK)
         elif self._active or self._hover or self.isDown():
