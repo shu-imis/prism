@@ -2,7 +2,7 @@
 
 厂商预设、.env 读写、「当前生效厂商」（LLM_ACTIVE_VENDOR）与统一的
 LLMClient 构造入口。仿真、文档分析、画像生成、结果分析等所有 AI
-调用点统一从这里取配置，不再各自拼装 VendorSettings。
+调用点统一从这里取配置。
 
 API Key 属于敏感信息，任何情况下都不明文落盘：
 1. 优先存入操作系统钥匙串（macOS Keychain / Windows Credential

@@ -50,7 +50,7 @@ class Scenario:
 
 
 class ScenarioParser:
-    """场景解析器 — 将原始输入转为结构化 Scenario"""
+    """提供 parse / from_dict 两个构建 Scenario 的入口。"""
 
     @staticmethod
     def parse(

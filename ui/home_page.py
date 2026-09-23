@@ -129,7 +129,7 @@ class HomePage(QWidget):
             self._grid.addWidget(btn, i // cols, i % cols)
 
     def resizeEvent(self, event):
-        """窗口宽度变化时重新计算列数并刷新布局（防抖，拖拽稳定后才重建）。"""
+        """宽度变化时重启防抖定时器，列数稳定后由 _on_resize_settled 决定是否重建。"""
         super().resizeEvent(event)
         if hasattr(self, '_resize_timer'):
             self._resize_timer.start()
@@ -152,11 +152,11 @@ class HomePage(QWidget):
         menu.popup(btn.mapToGlobal(pos))
 
     def _confirm_delete(self, pid, name):
-        # 软删除在应用内无恢复入口，且级联删除仿真轮次与报告，需二次确认
+        # 软删除仅标记 deleted_at，应用内无恢复入口，需二次确认
         if ConfirmDialog.confirm(
             self,
             "删除项目",
-            f"确定删除项目「{name}」吗？\n其全部仿真轮次、报告与知识库将一并删除，且无法在应用内恢复。",
+            f"确定删除项目「{name}」吗？\n项目将从列表移除，且无法在应用内恢复。",
             ok_text="删除",
             danger=True,
         ):

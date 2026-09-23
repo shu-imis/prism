@@ -33,7 +33,7 @@ from ui.widgets import Caption, Card, ConfirmDialog, GhostBtn, SecondaryBtn, Tit
 
 _METRIC_COLUMNS = ("周期", *METRICS.values())
 
-# 横幅 KPI：标签、末值字段、delta 字段、格式、方向语义
+# 横幅 KPI：标签、末值字段、delta 字段、末值格式、delta 格式、方向语义
 _KPIS = [
     ("库存", "final_inventory", "inventory_delta", "{:.1f}", "{:+.1f}", "neutral"),
     ("成本", "final_cost", "cost_delta", "{:.1f}", "{:+.1f}", "down_good"),
@@ -253,7 +253,7 @@ class ResultPage(QWidget):
     # --- 渲染 ---
 
     def reset(self):
-        """清空页面（新建项目或切换到无数据项目时调用）。"""
+        """清空页面（新建项目时调用）。"""
         self._report = None
         self._rounds = []
         self._pid = None

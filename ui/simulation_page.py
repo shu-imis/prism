@@ -455,7 +455,7 @@ class SimulationPage(QWidget):
         """同步等待旧 worker 线程结束后安全清理。调用方在主线程。
 
         取消后等待线程自行退出（引擎在当前 LLM 调用完成后保存检查点
-        并干净结束），超时取 LLM 请求上限留足余量。
+        并干净结束），超时按默认请求超时 30s 留余量。
         """
         w = self._worker
         if w is None:

@@ -13,10 +13,10 @@ class AgentSnapshot:
     agent_id: int
     pressure: float = 0.0           # 压力/焦虑水平 0~1
     decision_stance: str = ""       # 决策倾向：aggressive/cautious/cooperative/defensive
-    spoke: bool = False             # 本轮是否激活
+    spoke: bool = False             # 本轮是否实际发言
     speech: str = ""                # 响应/发言内容
     decision_summary: str = ""      # 本轮决策摘要
-    action_type: str = ""           # 本轮行动类型（受限行动空间）
+    action_type: str = ""           # 本轮行动类型
     reaction_to: str = ""           # 回应对象行为体名
 
 

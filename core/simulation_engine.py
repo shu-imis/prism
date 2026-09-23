@@ -251,10 +251,10 @@ class SimulationEngine:
                 rounds = [WorldState.from_dict(resume["last_state"])]
             start_round = int(resume.get("last_round", 0)) + 1
             ws = rounds[-1] if rounds else self._initial_world_state(agents)
-            # 以检查点保存时的 max_rounds 为准：配置改小后恢复不应"零轮直接完成"
+            # 以检查点保存时的 max_rounds 为准：配置改小后恢复不应「零轮直接完成」
             max_rounds = int(resume.get("max_rounds") or self.state.config.max_rounds)
             self.state.total_rounds = max_rounds
-            # 续传事件检测器的连续计数，跨断点的"连续两轮"检测链不断裂
+            # 续传事件检测器的连续计数，跨断点的「连续两轮」检测链不断裂
             if resume.get("detector"):
                 self._detector = detector = EventDetector.from_dict(resume["detector"])
         else:
@@ -266,7 +266,7 @@ class SimulationEngine:
             self._save_checkpoint(ws, agents)
 
         # 行动信息流：行为体互动的共享载体。feed 不入检查点，恢复时从空开始，
-        # 首轮观察降级为"暂无"，随后续轮次逐轮重建
+        # 首轮观察降级为「暂无可观察行动」，随后续轮次逐轮重建
         feed = ActionFeed()
 
         for round_index in range(start_round, max_rounds + 1):
@@ -855,8 +855,8 @@ class SimulationEngine:
         return relations
 
     def _apply_bullwhip_effect(self, agents: list[Agent]) -> None:
-        """牛鞭效应：上游行为体的波动被逐级放大。"""
-        # 找到下游行为体（零售商、消费者）的 pressure 水平
+        """牛鞭效应：下游行为体的压力向上游传导放大。"""
+        # 找到激进倾向行为体的压力水平（默认模板中即零售商、消费者）
         downstream = [a for a in agents if a.decision_stance == "aggressive"]
         if not downstream:
             return

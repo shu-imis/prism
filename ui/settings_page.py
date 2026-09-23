@@ -4,7 +4,7 @@
 - LLM 配置：所有 AI 功能（Step1 文档分析、Step2 行为体生成、Step3 仿真、
   Step4 结果分析）统一使用此处选中的厂商配置。
 - 仿真参数：仿真轮次、行为体决策温度。
-配置持久化到 .env，保存后当前进程立即生效。
+API Key 存入系统钥匙串，其余配置写入 .env，保存后当前进程立即生效。
 """
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -76,7 +76,7 @@ class SettingsPage(QWidget):
         card.add(Title("LLM 配置", 14))
         card.add(Caption(
             "所有 AI 功能（Step1 文档分析、Step2 行为体生成、Step3 供应链仿真、"
-            "Step4 结果分析）统一使用此处选中的厂商。配置保存在 .env 文件中。"
+            "Step4 结果分析）统一使用此处选中的厂商。API Key 存入系统钥匙串，其余配置保存在 .env 文件中。"
         ))
 
         self._vendor_seg = SegmentedControl(
@@ -204,7 +204,7 @@ class SettingsPage(QWidget):
     def _on_save(self):
         self._save_current_vendor_state()
         ok_vendor = persist_vendor_state(self._vendor_state, active_vendor=self._vendor_index)
-        # 仿真参数：写 .env 并同步当前进程配置（下一次仿真生效）
+        # 仿真与调用参数：写 .env 并同步当前进程配置（下一次仿真生效）
         max_rounds = self._sim_rounds.value()
         decision_temperature = round(self._decision_temperature.value(), 2)
         request_timeout = self._request_timeout.value()

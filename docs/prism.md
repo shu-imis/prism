@@ -227,7 +227,7 @@ Prism 为单体桌面应用，基于 PySide6 实现全部交互与业务逻辑�
 - **观察层**：邻居行动全部可见，非邻居行动仅高影响力（≥1.5）广播可见；节点链路缺失时使用兜底主链（供应商→制造商→分销商→零售商→消费者）判定上下游；同一行为体相邻轮次内容高度相似（相似度 ≥0.7）时旧条目折叠为「持续中」，抑制发言复读
 - **行动空间**：`maintain / adjust_supply / adjust_price / adjust_capacity / expedite_logistics / reduce_orders / shift_demand / intervene`，每类行为体仅有子集（如监管只能 maintain/intervene）
 - **同步更新语义**：同轮行为体互不可见，反应链跨一轮形成（与 MiroFish/OASIS 一致）
-- 检查点恢复时信息流从空重建，首轮观察降级为"暂无"，随后续轮次恢复
+- 检查点恢复时信息流从空重建，首轮观察降级为「暂无可观察行动」，随后续轮次恢复
 
 ### 6.4 关键事件
 | 事件类型 | 触发条件 | 影响 |
@@ -248,6 +248,8 @@ Prism 为单体桌面应用，基于 PySide6 实现全部交互与业务逻辑�
 prism/
 ├── main.py                       # 应用入口，字体加载
 ├── config.py                     # 全局配置
+├── __init__.py                   # 版本号唯一来源（main.py / prism.spec 读取）
+├── prism.spec                    # PyInstaller 打包脚本
 ├── requirements.txt
 ├── requirements-dev.txt          # 开发/测试依赖（pytest）
 ├── assets/

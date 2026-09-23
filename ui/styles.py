@@ -240,7 +240,7 @@ QSlider::sub-page:horizontal {{ background: {TEXT_PRIMARY}; border-radius: 0px; 
 {_scrollbar_qss(BG_PAGE)}
 {_scrollbar_qss(BG_TERMINAL, scope="#terminalLog")}
 
-/* ---- 滚动区域（全局统一，消除各页面的重复内联样式） ---- */
+/* ---- 滚动区域（全局统一样式） ---- */
 QScrollArea {{ background: transparent; border: none; }}
 """
 
