@@ -27,6 +27,10 @@ COLOR_RED = "#C46B6B"
 COLOR_ORANGE = "#D4A853"
 COLOR_BLUE = "#6B8EB3"
 
+# 失焦（窗口非激活）时的收敛色
+TEXT_INACTIVE = "#AAAAA5"
+BG_INACTIVE_CHECKED = "#EFEFEA"
+
 # 语义化表面色：新增深色表面时在此登记，滚动条等派生颜色即自动适配
 BG_TERMINAL = TEXT_PRIMARY
 
@@ -238,9 +242,6 @@ QSlider::sub-page:horizontal {{ background: {TEXT_PRIMARY}; border-radius: 0px; 
 
 /* ---- 滚动区域（全局统一，消除各页面的重复内联样式） ---- */
 QScrollArea {{ background: transparent; border: none; }}
-
-/* ---- 自定义标题栏 ---- */
-#titleBar {{ background: {BG_PAGE}; }}
 """
 
 # ============================================================
