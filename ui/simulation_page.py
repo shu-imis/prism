@@ -17,7 +17,6 @@ from core.scenario_parser import Scenario
 from core.simulation_engine import SimulationEngine, SimulationRecoverableError
 from db.database import Database
 from db.models import (
-    MAIN_SIMULATION_NAME,
     CheckpointRepository,
     KnowledgeRepository,
     ProjectRepository,
@@ -341,11 +340,7 @@ class SimulationPage(QWidget):
         """从 DB 加载主仿真的历史轮次数据并回显到日志和指标卡。"""
         if not self._pid:
             return
-        main_record = next(
-            (s for s in SimulationRepository().list_by_project(self._pid)
-             if s.name == MAIN_SIMULATION_NAME),
-            None,
-        )
+        main_record = SimulationRepository().get_main(self._pid)
         if main_record is None:
             return
         rounds = SimulationRoundRepository().list_by_simulation(main_record.id)
@@ -431,11 +426,7 @@ class SimulationPage(QWidget):
                 self.log("检测到检查点，从断点恢复", is_error=False)
             else:
                 # 全新启动：清掉上次运行残留的轮次，避免轮次 upsert 跨次混杂
-                main = next(
-                    (s for s in SimulationRepository().list_by_project(self._pid)
-                     if s.name == MAIN_SIMULATION_NAME),
-                    None,
-                )
+                main = SimulationRepository().get_main(self._pid)
                 if main:
                     SimulationRoundRepository().delete_for_simulation(main.id)
         self._worker.progress.connect(self._on_progress)
@@ -597,11 +588,7 @@ class SimulationPage(QWidget):
         self._dispose_worker()
         if self._pid:
             CheckpointRepository().delete_for_project(self._pid)
-            main = next(
-                (s for s in SimulationRepository().list_by_project(self._pid)
-                 if s.name == MAIN_SIMULATION_NAME),
-                None,
-            )
+            main = SimulationRepository().get_main(self._pid)
             if main:
                 SimulationRoundRepository().delete_for_simulation(main.id)
             # 将项目状态回退到草稿，避免项目列表显示过期状态

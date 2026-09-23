@@ -15,9 +15,8 @@ from ui.persona_page import PersonaPage
 from ui.result_page import ResultPage
 from ui.simulation_page import SimulationPage
 from ui.styles import *
-from ui.widgets import Divider, PrimaryBtn, SecondaryBtn
+from ui.widgets import Divider, PrimaryBtn, SecondaryBtn, StatusDot
 from db.models import (
-    MAIN_SIMULATION_NAME,
     CheckpointRepository,
     ProjectRepository,
     ReportRepository,
@@ -65,8 +64,7 @@ class ProcessPage(QWidget):
         bl.addWidget(self._nm)
         bl.addStretch()
 
-        self._dot = QLabel("●")
-        self._dot.setStyleSheet(f"color:{BORDER};font-size:10px;")
+        self._dot = StatusDot(BORDER)
         bl.addWidget(self._dot)
         bl.addSpacing(PAD_SM)
 
@@ -128,7 +126,7 @@ class ProcessPage(QWidget):
         self._log.setViewportMargins(10, 6, 10, 6)
         layout.addWidget(self._log)
 
-        self._p("工作区已就绪")
+        self._log_msg("工作区已就绪")
         self._update()
 
     def _wire(self):
@@ -149,14 +147,14 @@ class ProcessPage(QWidget):
     def _on_saved(self, pid):
         self._pid = pid
         self._saved_steps.add(self._step)
-        self._p(f"项目已保存（#{pid}）")
+        self._log_msg(f"项目已保存（#{pid}）")
         self._advance()
 
     def _on_done(self, pid, r, res):
         if pid != self._pid:
             # 旧 worker 完成时当前可能已切换到其他项目，忽略避免跨项目串扰
             return
-        self._p("仿真已完成")
+        self._log_msg("仿真已完成")
         self._update()
         self._rp.set_report(r, res, project_id=self._pid)
         # 持久化报告（主线程）；仿真轮次已由引擎自行落库
@@ -175,7 +173,7 @@ class ProcessPage(QWidget):
                     summary=r.to_dict(),
                 )
             except Exception as e:
-                self._p(f"数据保存失败：{e}")
+                self._log_msg(f"数据保存失败：{e}")
 
     def _next_clicked(self):
         if self._step == 0:
@@ -237,7 +235,7 @@ class ProcessPage(QWidget):
         status_text, status_color = self._step_status()
         self._st.setText(status_text)
         self._st.setStyleSheet(f"font-size:12px;color:{status_color};")
-        self._dot.setStyleSheet(f"color:{status_color};font-size:10px;")
+        self._dot.set_color(status_color)
 
     def _step_status(self) -> tuple[str, str]:
         """当前步骤的状态文案与颜色。"""
@@ -258,9 +256,6 @@ class ProcessPage(QWidget):
         if self._is_sim_done():
             return STATUS_LABELS["completed"], STATUS_COLORS["completed"]
         return "待仿真", TEXT_MUTED
-
-    def _p(self, msg):
-        self._log.appendPlainText(f"  >  {msg}")
 
     def load_project(self, pid):
         self._pid = pid
@@ -288,7 +283,7 @@ class ProcessPage(QWidget):
         self._update()
         self._log.clear()
         self._ep.load_project(pid)
-        self._p(f"项目已加载（#{pid}）")
+        self._log_msg(f"项目已加载（#{pid}）")
         if self._is_sim_done():
             self._smp.load_project(pid)    # 预加载 Step 3 历史
             self._rp.load_project(pid)     # 预加载 Step 4 报告
@@ -307,11 +302,7 @@ class ProcessPage(QWidget):
     @staticmethod
     def _has_rounds(pid) -> bool:
         """主仿真是否存在轮次数据。"""
-        main_record = next(
-            (s for s in SimulationRepository().list_by_project(pid)
-             if s.name == MAIN_SIMULATION_NAME),
-            None,
-        )
+        main_record = SimulationRepository().get_main(pid)
         return bool(
             main_record
             and SimulationRoundRepository().list_by_simulation(main_record.id)
@@ -338,4 +329,4 @@ class ProcessPage(QWidget):
         self._sp.reset()
         self._smp.reset()
         self._rp.reset()
-        self._p("工作区已就绪")
+        self._log_msg("工作区已就绪")

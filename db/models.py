@@ -211,14 +211,12 @@ class SimulationRepository:
             )
         return self.get_by_id(int(cursor.lastrowid))
 
-    def get_by_id(self, simulation_id: int) -> Simulation:
+    def get_by_id(self, simulation_id: int) -> Simulation | None:
         row = self.db.conn.execute(
             "SELECT * FROM simulations WHERE id = ?",
             (simulation_id,),
         ).fetchone()
-        if row is None:
-            raise KeyError(f"仿真记录不存在: {simulation_id}")
-        return Simulation(**dict(row))
+        return Simulation(**dict(row)) if row else None
 
     def list_by_project(self, project_id: int) -> list[Simulation]:
         rows = self.db.conn.execute(
@@ -227,12 +225,17 @@ class SimulationRepository:
         ).fetchall()
         return [Simulation(**dict(row)) for row in rows]
 
-    def get_or_create_main(self, project_id: int) -> Simulation:
-        """返回项目的隐含主仿真记录（simulations 表仅作持久化锚点）。"""
+    def get_main(self, project_id: int) -> Simulation | None:
+        """返回项目的主仿真记录，不存在返回 None。"""
         for simulation in self.list_by_project(project_id):
             if simulation.name == MAIN_SIMULATION_NAME:
                 return simulation
-        return self.create(project_id, MAIN_SIMULATION_NAME)
+        return None
+
+    def get_or_create_main(self, project_id: int) -> Simulation:
+        """返回项目的隐含主仿真记录（simulations 表仅作持久化锚点）。"""
+        main = self.get_main(project_id)
+        return main if main is not None else self.create(project_id, MAIN_SIMULATION_NAME)
 
 
 class SimulationRoundRepository:
@@ -319,14 +322,12 @@ class SimulationRoundRepository:
             raise KeyError("仿真轮次保存失败。")
         return int(row["id"])
 
-    def get_by_id(self, round_id: int) -> SimulationRound:
+    def get_by_id(self, round_id: int) -> SimulationRound | None:
         row = self.db.conn.execute(
             "SELECT * FROM simulation_rounds WHERE id = ?",
             (round_id,),
         ).fetchone()
-        if row is None:
-            raise KeyError(f"仿真轮次不存在: {round_id}")
-        return SimulationRound(**dict(row))
+        return SimulationRound(**dict(row)) if row else None
 
     def list_by_simulation(self, simulation_id: int) -> list[SimulationRound]:
         rows = self.db.conn.execute(
@@ -496,11 +497,7 @@ def invalidate_simulation_results(project_id: int) -> None:
     删除主仿真轮次、检查点与报告，并把项目状态回退为 draft，
     供 Step1/Step2 保存时在 completed/interrupted 项目上调用。
     """
-    main = next(
-        (s for s in SimulationRepository().list_by_project(project_id)
-         if s.name == MAIN_SIMULATION_NAME),
-        None,
-    )
+    main = SimulationRepository().get_main(project_id)
     if main:
         SimulationRoundRepository().delete_for_simulation(main.id)
     CheckpointRepository().delete_for_project(project_id)
@@ -542,14 +539,12 @@ class KnowledgeRepository:
                 ids.append(int(cursor.lastrowid))
         return [self.get_by_id(chunk_id) for chunk_id in ids]
 
-    def get_by_id(self, chunk_id: int) -> KnowledgeChunk:
+    def get_by_id(self, chunk_id: int) -> KnowledgeChunk | None:
         row = self.db.conn.execute(
             "SELECT * FROM knowledge_chunks WHERE id = ?",
             (chunk_id,),
         ).fetchone()
-        if row is None:
-            raise KeyError(f"知识片段不存在: {chunk_id}")
-        return KnowledgeChunk(**dict(row))
+        return KnowledgeChunk(**dict(row)) if row else None
 
     def list_by_project(self, project_id: int) -> list[KnowledgeChunk]:
         rows = self.db.conn.execute(

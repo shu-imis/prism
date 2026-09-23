@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
 from core.constants import METRICS
 from core.world_state import WorldState
 from db.models import (
-    MAIN_SIMULATION_NAME,
     ReportRepository,
     SimulationRepository,
     SimulationRoundRepository,
@@ -27,7 +26,7 @@ from llm.analysis import analyze_evolution
 from llm.config import build_llm_client
 from report.exporter import ReportExporter
 from report.generator import ReportGenerator, SimulationReport
-from ui.ai_worker import run_ai_task
+from ui.ai_worker import run_ai_task_with_button
 from ui.charts import MetricsChart, RadarChart, SwimlaneGrid
 from ui.styles import *
 from ui.widgets import Caption, Card, ConfirmDialog, GhostBtn, SecondaryBtn, Title, clear_layout
@@ -230,11 +229,7 @@ class ResultPage(QWidget):
     # --- 数据加载 ---
 
     def _load_rounds(self, project_id):
-        main_record = next(
-            (s for s in SimulationRepository().list_by_project(project_id)
-             if s.name == MAIN_SIMULATION_NAME),
-            None,
-        )
+        main_record = SimulationRepository().get_main(project_id)
         if main_record is None:
             return []
         states = []
@@ -390,18 +385,17 @@ class ResultPage(QWidget):
                 "未找到可用的 LLM 配置，请到左侧「设置」页填写 API Key"
             ))
             return
-        self._ai_btn.setEnabled(False)
-        self._ai_btn.setText("AI 分析中…")
         report, rounds, pid = self._report, list(self._rounds), self._pid
-        run_ai_task(
+        run_ai_task_with_button(
             self,
+            self._ai_btn,
+            "AI 分析中…",
             lambda: analyze_evolution(client, report, rounds),
             lambda analysis: self._on_ai_analysis(analysis, pid),
             lambda err: self._on_ai_analysis_error(err, pid),
         )
 
     def _reset_ai_btn(self):
-        self._ai_btn.setEnabled(True)
         analysis = (self._report.ai_analysis if self._report else {}) or {}
         self._ai_btn.setText("↺ 重新生成" if analysis else "生成 AI 分析")
 

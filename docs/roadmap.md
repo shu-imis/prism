@@ -26,12 +26,12 @@
 - [ ] 自定义供应链节点参数编辑
 - [ ] 仿真回放与单步调试
 - [ ] 仿真后行为体采访（MiroFish INTERVIEW 式）
-- [ ] NodeEditor 节点类型选择器改用 SegmentedControl
-- [ ] 状态显示组件统一（StatusDot / Caption 等多种写法收拢）
-- [ ] 主仿真记录查询下沉到 Repository 层（现散落 6 处）
-- [ ] db 层 get_by_id 语义统一（返回 None vs 抛 KeyError）
-- [ ] WorldState.simulated_hour 与 round 合并评估（涉及 DB schema 迁移）
-- [ ] 各页 AI 按钮启停逻辑抽公共 helper
+- [x] NodeEditor 节点类型选择器改用 SegmentedControl
+- [x] 状态显示组件统一（StatusDot / Caption 等多种写法收拢）
+- [x] 主仿真记录查询下沉到 Repository 层（现散落 6 处）
+- [x] db 层 get_by_id 语义统一（返回 None vs 抛 KeyError）
+- [x] WorldState.simulated_hour 与 round 合并评估（结论：保留为同值兼容字段，不动 schema）
+- [x] 各页 AI 按钮启停逻辑抽公共 helper
 
 ---
 
