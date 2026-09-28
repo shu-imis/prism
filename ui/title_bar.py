@@ -171,6 +171,8 @@ class TitleBar(QWidget):
         layout.setSpacing(0)
 
         if IS_MAC:
+            # 边距清零：12px 左边距在 left 容器内设置，此处不叠加布局默认边距
+            layout.setContentsMargins(0, 0, 0, 0)
             self._build_macos(layout)
         else:
             layout.setContentsMargins(10, 0, 2, 0)
