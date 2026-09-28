@@ -24,6 +24,8 @@ BORDER_LIGHT = "#F0F0ED"
 
 COLOR_GREEN = "#6B8E6B"
 COLOR_RED = "#C46B6B"
+COLOR_RED_HOVER = "#B25C5C"
+COLOR_RED_PRESSED = "#9E5252"
 COLOR_ORANGE = "#D4A853"
 COLOR_BLUE = "#6B8EB3"
 
@@ -200,14 +202,16 @@ QMainWindow {{ background: {BG_PAGE}; }}
 #ghostBtn:hover {{ background: {BG_HOVER}; color: {TEXT_PRIMARY}; }}
 
 #dangerBtn {{
-    background: transparent;
-    border: 1px solid rgba(244,67,54,0.3);
+    background: {COLOR_RED};
+    border: none;
     border-radius: 0px;
-    color: {COLOR_RED};
-    padding: 4px 13px;
-    font-weight: 500;
+    color: {TEXT_ON_DARK};
+    padding: 5px 14px;
+    font-weight: 600;
 }}
-#dangerBtn:hover {{ background: rgba(244,67,54,0.06); }}
+#dangerBtn:hover {{ background: {COLOR_RED_HOVER}; }}
+#dangerBtn:pressed {{ background: {COLOR_RED_PRESSED}; }}
+#dangerBtn:disabled {{ background: rgba(196,107,107,0.15); color: rgba(196,107,107,0.5); }}
 
 /* ---- 输入 ---- */
 QLineEdit, QPlainTextEdit, QTextEdit {{
