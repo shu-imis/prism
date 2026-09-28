@@ -158,6 +158,96 @@ class RepositoryTests(unittest.TestCase):
             self.assertEqual(row[0], 30000)
             db.close()
 
+    def test_project_recycle_bin(self) -> None:
+        """软删除进回收站、可恢复；彻底删除经外键级联清空全部子表。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(Path(tmp) / "prism.db")
+            db.migrate()
+            project_repo = ProjectRepository(db)
+            simulation_repo = SimulationRepository(db)
+            round_repo = SimulationRoundRepository(db)
+            report_repo = ReportRepository(db)
+            checkpoint_repo = CheckpointRepository(db)
+            knowledge_repo = KnowledgeRepository(db)
+
+            project = project_repo.create("Demo", {"industry": "electronics"})
+            simulation = simulation_repo.create(project.id)
+            round_repo.save(
+                project_id=project.id,
+                simulation_id=simulation.id,
+                round_index=1,
+                simulated_hour=1,
+                inventory_level=70.0,
+                cost_index=55.0,
+                delivery_delay=0.5,
+                state={},
+                agent_messages=[{"agent_name": "零售商", "content": "促销。"}],
+            )
+            report_repo.save(project_id=project.id, title="报告", markdown="md", summary={})
+            checkpoint_repo.save(
+                project_id=project.id, simulation_id=simulation.id,
+                last_round=1, engine_state={},
+            )
+            knowledge_repo.replace_for_project(
+                project.id, [{"source": "a.md", "chunk_index": 0, "content": "原材料"}]
+            )
+
+            # 守卫：未进回收站的项目不能被彻底删除
+            project_repo.hard_delete(project.id)
+            self.assertIsNotNone(project_repo.get_by_id(project.id))
+
+            project_repo.soft_delete(project.id)
+            self.assertEqual(project_repo.list_all(), [])
+            self.assertEqual([p.id for p in project_repo.list_deleted()], [project.id])
+
+            project_repo.restore(project.id)
+            self.assertEqual(project_repo.list_deleted(), [])
+            self.assertEqual([p.id for p in project_repo.list_all()], [project.id])
+
+            project_repo.soft_delete(project.id)
+            project_repo.hard_delete(project.id)
+            self.assertEqual(project_repo.list_deleted(), [])
+            for table in (
+                "simulations", "simulation_rounds", "agent_messages",
+                "checkpoints", "reports", "knowledge_chunks",
+            ):
+                row = db.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                self.assertEqual(row[0], 0, f"{table} 应有零残留")
+            db.close()
+
+    def test_project_empty_trash(self) -> None:
+        """empty_trash 清空全部已删项目，未删除项目不受影响。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(Path(tmp) / "prism.db")
+            db.migrate()
+            repo = ProjectRepository(db)
+
+            keep = repo.create("保留", {})
+            for name in ("甲", "乙"):
+                repo.soft_delete(repo.create(name, {}).id)
+
+            repo.empty_trash()
+            self.assertEqual(repo.list_deleted(), [])
+            self.assertEqual([p.id for p in repo.list_all()], [keep.id])
+            db.close()
+
+    def test_project_restore_all(self) -> None:
+        """restore_all 恢复全部已删项目，未删除项目不受影响。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(Path(tmp) / "prism.db")
+            db.migrate()
+            repo = ProjectRepository(db)
+
+            keep = repo.create("保留", {})
+            for name in ("甲", "乙"):
+                repo.soft_delete(repo.create(name, {}).id)
+
+            repo.restore_all()
+            self.assertEqual(repo.list_deleted(), [])
+            self.assertEqual(len(repo.list_all()), 3)
+            self.assertIsNotNone(repo.get_by_id(keep.id))
+            db.close()
+
     def test_report_save_or_update_latest(self) -> None:
         """save_or_update_latest：首次插入，再次调用更新同一行，reports 表不膨胀。"""
         with tempfile.TemporaryDirectory() as tmp:

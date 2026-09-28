@@ -170,6 +170,41 @@ class ProjectRepository:
                 (project_id,),
             )
 
+    def list_deleted(self) -> list[Project]:
+        rows = self.db.conn.execute(
+            """
+            SELECT * FROM projects
+            WHERE deleted_at IS NOT NULL
+            ORDER BY deleted_at DESC, id DESC
+            """
+        ).fetchall()
+        return [Project(**dict(row)) for row in rows]
+
+    def restore(self, project_id: int) -> None:
+        with self.db.transaction() as conn:
+            conn.execute(
+                "UPDATE projects SET deleted_at = NULL WHERE id = ?",
+                (project_id,),
+            )
+
+    def hard_delete(self, project_id: int) -> None:
+        """彻底删除回收站内的项目，外键级联清空全部子表数据。"""
+        with self.db.transaction() as conn:
+            conn.execute(
+                "DELETE FROM projects WHERE id = ? AND deleted_at IS NOT NULL",
+                (project_id,),
+            )
+
+    def empty_trash(self) -> None:
+        """清空回收站：彻底删除全部已软删项目，外键级联清空全部子表数据。"""
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM projects WHERE deleted_at IS NOT NULL")
+
+    def restore_all(self) -> None:
+        """全部恢复：清除全部软删标记，所有回收站项目回到列表。"""
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE projects SET deleted_at = NULL WHERE deleted_at IS NOT NULL")
+
     def update_scenario(
         self,
         project_id: int,

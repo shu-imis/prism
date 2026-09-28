@@ -1,20 +1,21 @@
-"""首页 — 项目列表"""
+"""项目页 — 项目列表 / 回收站"""
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QGridLayout, QPushButton,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from ui.styles import *
-from ui.widgets import Title, Caption, ConfirmDialog, PrimaryBtn, PopupMenu, StatusDot
+from ui.widgets import Title, Caption, ConfirmDialog, PrimaryBtn, DangerBtn, PopupMenu, StatusDot
 from db.models import ProjectRepository, is_valid_json
 
 
-class HomePage(QWidget):
+class ProjectsPage(QWidget):
     new_project = Signal()
     open_project = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._repo = ProjectRepository()
+        self._mode = "active"
         self._build()
 
     def _build(self):
@@ -24,11 +25,21 @@ class HomePage(QWidget):
 
         hdr = QHBoxLayout()
         hdr.setContentsMargins(PAD_XL, 0, PAD_XL, 0)
-        hdr.addWidget(Title("项目列表", 18))
+        self._title = Title("项目列表", 18)
+        hdr.addWidget(self._title)
         hdr.addStretch()
-        new_btn = PrimaryBtn("＋ 新建项目")
-        new_btn.clicked.connect(lambda: self.new_project.emit())
-        hdr.addWidget(new_btn)
+        self._new_btn = PrimaryBtn("＋ 新建项目")
+        self._new_btn.clicked.connect(lambda: self.new_project.emit())
+        hdr.addWidget(self._new_btn)
+        # 回收站模式下同位置替换为 全部恢复 + 清空回收站
+        self._restore_btn = PrimaryBtn("全部恢复")
+        self._restore_btn.clicked.connect(self._restore_all)
+        self._restore_btn.setVisible(False)
+        hdr.addWidget(self._restore_btn)
+        self._clear_btn = DangerBtn("清空回收站")
+        self._clear_btn.clicked.connect(self._confirm_empty_trash)
+        self._clear_btn.setVisible(False)
+        hdr.addWidget(self._clear_btn)
         layout.addLayout(hdr)
 
         self._scroll = QScrollArea()
@@ -58,13 +69,27 @@ class HomePage(QWidget):
         vw = self._scroll.viewport().width() - 2 * PAD_XL
         return max(1, vw // (240 + PAD_MD))
 
+    def set_mode(self, mode: str):
+        """切换项目列表 / 回收站模式，由侧栏入口驱动。"""
+        self._mode = mode
+        self._title.setText("回收站" if mode == "trash" else "项目列表")
+        self._new_btn.setVisible(mode == "active")
+        self._restore_btn.setVisible(mode == "trash")
+        self._clear_btn.setVisible(mode == "trash")
+        self.refresh()
+
     def refresh(self):
         while self._grid.count():
             item = self._grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        projects = self._repo.list_all()
+        in_trash = self._mode == "trash"
+        projects = self._repo.list_deleted() if in_trash else self._repo.list_all()
+        if in_trash:
+            has_items = bool(projects)
+            self._restore_btn.setEnabled(has_items)
+            self._clear_btn.setEnabled(has_items)
         cols = self._columns()
 
         # 先清除所有历史列的拉伸因子，避免列数减少时残留的 stretch 把内容挤偏
@@ -73,7 +98,8 @@ class HomePage(QWidget):
         self._last_cols = cols
 
         if not projects:
-            empty = QLabel("暂无项目\n点击「＋ 新建项目」创建")
+            empty_text = "回收站为空" if in_trash else "暂无项目\n点击「＋ 新建项目」创建"
+            empty = QLabel(empty_text)
             empty.setAlignment(Qt.AlignCenter)
             empty.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 14px; padding: 40px;")
             for col in range(cols):
@@ -87,25 +113,27 @@ class HomePage(QWidget):
             btn = QPushButton()
             btn.setStyleSheet(
                 f"QPushButton {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; border-radius: {RADIUS}px; }}"
-                f"QPushButton:hover {{ border-color: {TEXT_PRIMARY}; }}"
+                + ("" if in_trash else f"QPushButton:hover {{ border-color: {TEXT_PRIMARY}; }}")
             )
-            btn.setCursor(Qt.PointingHandCursor)
             btn.setFixedSize(240, 140)
-            btn.clicked.connect(lambda checked, pid=proj.id: self.open_project.emit(pid))
+            if not in_trash:
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.clicked.connect(lambda checked, pid=proj.id: self.open_project.emit(pid))
             btn.setContextMenuPolicy(Qt.CustomContextMenu)
-            btn.customContextMenuRequested.connect(lambda pos, b=btn, pid=proj.id, name=proj.name: self._on_context_menu(b, pos, pid, name))
+            btn.customContextMenuRequested.connect(lambda pos, b=btn, p=proj: self._on_context_menu(b, pos, p))
 
             card_layout = QVBoxLayout(btn)
             card_layout.setContentsMargins(PAD_MD, PAD_MD, PAD_MD, PAD_MD)
             card_layout.setSpacing(PAD_XS)
 
-            sr = QHBoxLayout()
-            sr.addWidget(StatusDot(STATUS_COLORS.get(proj.status, TEXT_MUTED)))
-            sl = QLabel(STATUS_LABELS.get(proj.status, proj.status))
-            sl.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {STATUS_COLORS.get(proj.status, TEXT_MUTED)};")
-            sr.addWidget(sl)
-            sr.addStretch()
-            card_layout.addLayout(sr)
+            if not in_trash:
+                sr = QHBoxLayout()
+                sr.addWidget(StatusDot(STATUS_COLORS.get(proj.status, TEXT_MUTED)))
+                sl = QLabel(STATUS_LABELS.get(proj.status, proj.status))
+                sl.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {STATUS_COLORS.get(proj.status, TEXT_MUTED)};")
+                sr.addWidget(sl)
+                sr.addStretch()
+                card_layout.addLayout(sr)
 
             name = QLabel(proj.name)
             name.setWordWrap(True)
@@ -123,7 +151,10 @@ class HomePage(QWidget):
 
             card_layout.addStretch()
 
-            date_str = (proj.created_at or "")[:10]
+            if in_trash:
+                date_str = f"删除于 {(proj.deleted_at or '')[:10]}"
+            else:
+                date_str = (proj.created_at or "")[:10]
             card_layout.addWidget(Caption(date_str))
 
             self._grid.addWidget(btn, i // cols, i % cols)
@@ -146,17 +177,53 @@ class HomePage(QWidget):
         self._current_cols = self._columns()
         self.refresh()
 
-    def _on_context_menu(self, btn, pos, pid, name):
+    def _on_context_menu(self, btn, pos, proj):
         menu = PopupMenu(self)
-        menu.add_action("删除", lambda: self._confirm_delete(pid, name))
+        if self._mode == "trash":
+            menu.add_action("恢复", lambda: self._restore(proj.id))
+            menu.add_action("彻底删除", lambda: self._confirm_hard_delete(proj.id, proj.name))
+        else:
+            menu.add_action("删除", lambda: self._confirm_delete(proj.id, proj.name))
         menu.popup(btn.mapToGlobal(pos))
 
+    def _restore(self, pid):
+        self._repo.restore(pid)
+        self.refresh()
+
+    def _restore_all(self):
+        self._repo.restore_all()
+        self.refresh()
+
+    def _confirm_hard_delete(self, pid, name):
+        if ConfirmDialog.confirm(
+            self,
+            "彻底删除项目",
+            f"永久删除项目「{name}」及其全部仿真数据，无法恢复。",
+            ok_text="彻底删除",
+            danger=True,
+        ):
+            self._repo.hard_delete(pid)
+            self.refresh()
+
+    def _confirm_empty_trash(self):
+        count = len(self._repo.list_deleted())
+        if not count:
+            return
+        if ConfirmDialog.confirm(
+            self,
+            "清空回收站",
+            f"永久删除回收站中的全部 {count} 个项目及其仿真数据，无法恢复。",
+            ok_text="清空回收站",
+            danger=True,
+        ):
+            self._repo.empty_trash()
+            self.refresh()
+
     def _confirm_delete(self, pid, name):
-        # 软删除仅标记 deleted_at，应用内无恢复入口，需二次确认
         if ConfirmDialog.confirm(
             self,
             "删除项目",
-            f"确定删除项目「{name}」吗？\n项目将从列表移除，且无法在应用内恢复。",
+            f"确定删除项目「{name}」吗？\n项目将移入回收站，可随时恢复。",
             ok_text="删除",
             danger=True,
         ):

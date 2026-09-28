@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from ui.styles import stylesheet, SIDEBAR_W, TEXT_INACTIVE, BG_INACTIVE_CHECKED, TEXT_MUTED
-from ui.home_page import HomePage
+from ui.projects_page import ProjectsPage
 from ui.process_page import ProcessPage
 from ui.settings_page import SettingsPage
 from ui.title_bar import TitleBar
@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         group = QButtonGroup(self)
         group.setExclusive(True)
 
-        for i, label in enumerate(["项目列表", "工作区", "设置"]):
+        for i, label in enumerate(["项目列表", "工作区", "回收站", "设置"]):
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
@@ -101,16 +101,16 @@ class MainWindow(QMainWindow):
 
         # --- 内容区 ---
         self._stack = QStackedWidget()
-        self._home = HomePage()
+        self._projects = ProjectsPage()
         self._process = ProcessPage()
         self._settings = SettingsPage()
-        self._stack.addWidget(self._home)
+        self._stack.addWidget(self._projects)
         self._stack.addWidget(self._process)
         self._stack.addWidget(self._settings)
 
-        self._home.new_project.connect(lambda: (self._process.reset(), self._go(1)))
-        self._home.open_project.connect(lambda pid: (self._process.load_project(pid), self._go(1)))
-        self._process.open_settings.connect(lambda: self._go(2))
+        self._projects.new_project.connect(lambda: (self._process.reset(), self._go(2)))
+        self._projects.open_project.connect(lambda pid: (self._process.load_project(pid), self._go(2)))
+        self._process.open_settings.connect(lambda: self._go(3))
 
         body = QHBoxLayout()
         body.setSpacing(0)
@@ -144,8 +144,14 @@ class MainWindow(QMainWindow):
         except RuntimeError:
             pass  # 窗口已在动画期间关闭，effect 随容器销毁
 
+    # 侧栏索引 → (stack 页面索引, ProjectsPage 模式)：项目列表与回收站共用项目页
+    _PAGE_MAP = [(0, "active"), (1, None), (0, "trash"), (2, None)]
+
     def _go(self, idx: int):
-        self._stack.setCurrentIndex(idx)
+        stack_idx, page_mode = self._PAGE_MAP[idx]
+        if page_mode:
+            self._projects.set_mode(page_mode)
+        self._stack.setCurrentIndex(stack_idx)
         for i, btn in self._btns.items():
             btn.setChecked(i == idx)
 
