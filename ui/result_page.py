@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from core.constants import METRICS
 from core.world_state import WorldState
 from db.models import (
+    ProjectRepository,
     ReportRepository,
     SimulationRepository,
     SimulationRoundRepository,
@@ -25,7 +26,7 @@ from db.models import (
 from llm.analysis import analyze_evolution
 from llm.config import build_llm_client
 from report.exporter import ReportExporter
-from report.generator import ReportGenerator, SimulationReport
+from report.generator import ReportGenerator, SimulationReport, recommendation_level
 from ui.ai_worker import run_ai_task_with_button
 from ui.charts import MetricsChart, RadarChart, SwimlaneGrid
 from ui.styles import *
@@ -38,7 +39,7 @@ _KPIS = [
     ("库存", "final_inventory", "inventory_delta", "{:.1f}", "{:+.1f}", "neutral"),
     ("成本", "final_cost", "cost_delta", "{:.1f}", "{:+.1f}", "down_good"),
     ("交付延迟", "final_delivery_delay", "delay_delta", "{:.1f}", "{:+.1f}", "down_good"),
-    ("服务水平", "final_service_level", "service_delta", "{:.0%}", "{:+.2f}", "up_good"),
+    ("服务水平", "final_service_level", "service_delta", "{:.0%}", "{:+.1%}", "up_good"),
     ("利润率", "final_profit_margin", "margin_delta", "{:+.1%}", "{:+.1%}", "up_good"),
 ]
 
@@ -213,13 +214,18 @@ class ResultPage(QWidget):
     def load_project(self, project_id):
         self._pid = project_id
         self._rounds = self._load_rounds(project_id)
+        project = ProjectRepository().get_by_id(project_id)
+        project_name = project.name if project else ""
 
         reports = ReportRepository().list_by_project(project_id)
         if reports:
             self._report = SimulationReport.from_dict(reports[0].summary)
+            if not self._report.project_name:
+                # 旧报告可能未存项目名：以当前项目名补齐，避免横幅只剩日期
+                self._report.project_name = project_name
         elif self._rounds:
-            generator = ReportGenerator()
-            generator.add_simulation_result(self._rounds)
+            generator = ReportGenerator(project_name)
+            generator.set_simulation_result(self._rounds)
             self._report = generator.generate()
         else:
             self._report = None
@@ -265,8 +271,10 @@ class ResultPage(QWidget):
         self._verdict.setText("")
         clear_layout(self._kpi_row)
         clear_layout(self._ai_body)
-        self._ai_btn.setEnabled(True)
-        self._ai_btn.setText("生成 AI 分析")
+        # AI 任务进行中不恢复按钮：任务结束时由 run_ai_task_with_button 自行复原
+        if not getattr(self, "_ai_workers", None):
+            self._ai_btn.setEnabled(True)
+            self._ai_btn.setText("生成 AI 分析")
         self._chart.set_rounds([])
         self._radar.set_scores({})
         clear_layout(self._risk_body)
@@ -292,19 +300,18 @@ class ResultPage(QWidget):
     # --- 深色横幅 ---
 
     def _render_banner(self, report: SimulationReport):
-        meta = report.project_name or ""
+        meta_parts = [report.project_name] if report.project_name else []
         if report.generated_at:
-            meta = f"{meta}　·　{report.generated_at[:16].replace('T', ' ')}".strip("　")
-        self._banner_project.setText(meta)
+            meta_parts.append(report.generated_at[:16].replace("T", " "))
+        self._banner_project.setText("　·　".join(meta_parts))
         self._banner_summary.setText(report.evolution_summary or "")
 
         rec = report.recommendation
-        if "健康" in rec or "可参照" in rec:
-            color = _DARK_GOOD
-        elif "可控" in rec:
-            color = COLOR_ORANGE
-        else:
-            color = _DARK_BAD
+        color = {
+            "ok": _DARK_GOOD,
+            "warn": COLOR_ORANGE,
+            "risk": _DARK_BAD,
+        }[recommendation_level(rec)]
         self._verdict.setText(rec)
         self._verdict.setStyleSheet(f"color:{color};")
 
@@ -344,7 +351,7 @@ class ResultPage(QWidget):
     def _render_ai_analysis(self):
         clear_layout(self._ai_body)
         analysis = (self._report.ai_analysis if self._report else {}) or {}
-        self._ai_btn.setText("↺ 重新生成" if analysis else "生成 AI 分析")
+        self._reset_ai_btn()
 
         if not analysis:
             self._ai_body.addWidget(Caption(
@@ -494,7 +501,7 @@ class ResultPage(QWidget):
             return
         try:
             ReportExporter.export_markdown(self._report, path, self._rounds)
-        except OSError as e:
+        except Exception as e:
             ConfirmDialog.confirm(
                 self, "导出失败", f"无法写入文件：\n{e}", ok_text="知道了", cancel_text="",
             )

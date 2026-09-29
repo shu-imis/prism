@@ -40,7 +40,7 @@ def is_valid_json(text: str | None) -> bool:
 MAIN_SIMULATION_NAME = "主仿真"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Project:
     """推演项目。"""
 
@@ -244,7 +244,10 @@ class SimulationRepository:
                 "INSERT INTO simulations (project_id, name) VALUES (?, ?)",
                 (project_id, name),
             )
-        return self.get_by_id(int(cursor.lastrowid))
+        simulation = self.get_by_id(int(cursor.lastrowid))
+        if simulation is None:
+            raise RuntimeError("仿真记录创建后无法读取")
+        return simulation
 
     def get_by_id(self, simulation_id: int) -> Simulation | None:
         row = self.db.conn.execute(
@@ -339,11 +342,14 @@ class SimulationRoundRepository:
                         round_id,
                         str(message.get("agent_name", "")),
                         str(message.get("stance", "neutral")),
-                        str(message.get("content", "")),
+                        str(message.get("speech", "")),
                         to_json(message.get("metrics", {})),
                     ),
                 )
-        return self.get_by_id(round_id)
+        saved = self.get_by_id(round_id)
+        if saved is None:
+            raise RuntimeError("仿真轮次保存后无法读取")
+        return saved
 
     def _find_round_id(self, simulation_id: int, round_index: int) -> int:
         row = self.db.conn.execute(
@@ -376,13 +382,8 @@ class SimulationRoundRepository:
         return [SimulationRound(**dict(row)) for row in rows]
 
     def delete_for_simulation(self, simulation_id: int) -> None:
-        """删除指定仿真记录的全部轮次与发言数据。"""
+        """删除指定仿真记录的全部轮次；发言经 agent_messages 的外键级联一并清除。"""
         with self.db.transaction() as conn:
-            conn.execute(
-                "DELETE FROM agent_messages WHERE round_id IN "
-                "(SELECT id FROM simulation_rounds WHERE simulation_id = ?)",
-                (simulation_id,),
-            )
             conn.execute(
                 "DELETE FROM simulation_rounds WHERE simulation_id = ?",
                 (simulation_id,),
@@ -421,10 +422,10 @@ class ReportRepository:
         markdown: str,
         summary: dict[str, Any],
     ) -> int:
-        """每个项目只保留一份主报告：有则更新最新一条，无则插入。
+        """更新项目最新一条主报告，无则插入。
 
-        防止重复仿真 / 反复生成 AI 分析导致 reports 表无限膨胀
-        （结果页始终只展示最新一条，旧记录无消费方）。
+        结果页始终只展示最新一条；若历史遗留多条旧记录，仅最新一条被覆盖，
+        更早的记录保留在表中但无消费方。
         """
         existing = self.list_by_project(project_id)
         if not existing:
@@ -510,37 +511,34 @@ class CheckpointRepository:
         ).fetchone()
         return Checkpoint(**dict(row)) if row else None
 
-    def list_unfinished(self, limit: int = 10) -> list[Checkpoint]:
-        rows = self.db.conn.execute(
-            """
-            SELECT * FROM checkpoints
-            ORDER BY created_at DESC, id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-        return [Checkpoint(**dict(row)) for row in rows]
-
     def delete_for_project(self, project_id: int) -> None:
         with self.db.transaction() as conn:
             conn.execute("DELETE FROM checkpoints WHERE project_id = ?", (project_id,))
 
 
-def invalidate_simulation_results(project_id: int) -> None:
+def invalidate_simulation_results(project_id: int, db: Database | None = None) -> None:
     """作废旧仿真结果：场景或行为体配置变更后，历史仿真数据不再有效。
 
-    删除主仿真轮次、检查点与报告，并把项目状态回退为 draft，
-    供 Step1/Step2 保存时在 completed/interrupted 项目上调用。
+    删除主仿真轮次（发言经外键级联清除）、检查点与报告，并把项目状态
+    回退为 draft，供 Step1/Step2 保存时在 completed/interrupted 项目上调用。
+    全部改动在单一事务内提交，避免部分生效的中间态。
     """
-    main = SimulationRepository().get_main(project_id)
-    if main:
-        SimulationRoundRepository().delete_for_simulation(main.id)
-    CheckpointRepository().delete_for_project(project_id)
-    ReportRepository().delete_for_project(project_id)
-    project = ProjectRepository().get_by_id(project_id)
-    if project:
-        ProjectRepository().update_scenario(
-            project_id, dict(project.scenario), status="draft"
+    db = db or Database()
+    with db.transaction() as conn:
+        main = conn.execute(
+            "SELECT id FROM simulations WHERE project_id = ? AND name = ?",
+            (project_id, MAIN_SIMULATION_NAME),
+        ).fetchone()
+        if main:
+            conn.execute(
+                "DELETE FROM simulation_rounds WHERE simulation_id = ?",
+                (int(main["id"]),),
+            )
+        conn.execute("DELETE FROM checkpoints WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM reports WHERE project_id = ?", (project_id,))
+        conn.execute(
+            "UPDATE projects SET status = 'draft', updated_at = datetime('now') WHERE id = ?",
+            (project_id,),
         )
 
 

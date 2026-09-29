@@ -12,7 +12,8 @@ from config import DB_PATH
 class Database:
     """SQLite 数据库管理器。
 
-    默认连接应用数据库；测试或脚本可传入独立 db_path，避免污染本地数据。
+    实例语义按参数分裂：不传 db_path 返回应用默认库的全局单例；
+    传入 db_path（测试或脚本场景，避免污染本地数据）则每次构造独立新实例。
     """
 
     _default_instance: Database | None = None
@@ -61,10 +62,10 @@ class Database:
 
     def migrate(self) -> None:
         """执行当前版本所需的完整 Schema 迁移。"""
-
-        with self.transaction() as conn:
-            conn.executescript(
-                """
+        # executescript 会先隐式提交再自建事务，DDL 不在 transaction() 的保护内、
+        # 无法回滚；全部语句均为幂等的 IF NOT EXISTS，中途失败重跑即可收敛
+        self.conn.executescript(
+            """
                 CREATE TABLE IF NOT EXISTS projects (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
@@ -154,8 +155,8 @@ class Database:
                     ON reports(project_id);
                 CREATE INDEX IF NOT EXISTS idx_knowledge_project_id
                     ON knowledge_chunks(project_id);
-                """
-            )
+            """
+        )
 
     def close(self) -> None:
         if self._conn:

@@ -9,7 +9,7 @@ from unittest import mock
 from config import app_config
 from core.action_feed import ActionFeed, ActionRecord
 from core.scenario_parser import ScenarioParser
-from core.simulation_engine import SimulationEngine
+from core.simulation_engine import AgentTurn, SimulationEngine
 from core.world_state import WorldState
 from db.database import Database
 from db.models import (
@@ -24,6 +24,23 @@ from tests.helpers import make_always_active_agents, make_fake_llm_client
 
 
 class SimulationEngineTests(unittest.TestCase):
+    def test_agent_turn_to_dict_single_serialized_keys(self) -> None:
+        """AgentTurn 序列化只写 stance/speech 单键（db 消费 stance）。"""
+        turn = AgentTurn(
+            agent_id=1,
+            agent_name="原材料供应商",
+            role="上游供应商",
+            decision_stance="cautious",
+            speech="收紧供应承诺",
+            response_summary="收紧供应承诺",
+        )
+        d = turn.to_dict()
+        self.assertEqual(d["stance"], "cautious")
+        self.assertEqual(d["speech"], "收紧供应承诺")
+        self.assertNotIn("decision_stance", d)
+        self.assertNotIn("content", d)
+        self.assertNotIn("response_summary", d["metrics"])
+
     def test_simulation_engine_runs_llm_rounds_and_events(self) -> None:
         """验证仿真引擎 LLM 多轮运行和事件检测。"""
         scenario = ScenarioParser.parse(

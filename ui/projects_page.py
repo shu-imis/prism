@@ -4,13 +4,14 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from ui.styles import *
-from ui.widgets import Title, Caption, ConfirmDialog, PrimaryBtn, DangerBtn, PopupMenu, StatusDot
+from ui.widgets import Title, Caption, ConfirmDialog, PrimaryBtn, DangerBtn, PopupMenu, StatusDot, clear_layout
 from db.models import ProjectRepository, is_valid_json
 
 
 class ProjectsPage(QWidget):
     new_project = Signal()
     open_project = Signal(int)
+    project_deleted = Signal(int)  # 软删 / 彻底删除 / 清空回收站时逐个发出，供主窗口联动工作区
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -29,7 +30,7 @@ class ProjectsPage(QWidget):
         hdr.addWidget(self._title)
         hdr.addStretch()
         self._new_btn = PrimaryBtn("＋ 新建项目")
-        self._new_btn.clicked.connect(lambda: self.new_project.emit())
+        self._new_btn.clicked.connect(self.new_project.emit)
         hdr.addWidget(self._new_btn)
         # 回收站模式下同位置替换为 全部恢复 + 清空回收站
         self._restore_btn = PrimaryBtn("全部恢复")
@@ -79,10 +80,7 @@ class ProjectsPage(QWidget):
         self.refresh()
 
     def refresh(self):
-        while self._grid.count():
-            item = self._grid.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._grid)  # 网格内只有卡片控件，直接复用通用清理
 
         in_trash = self._mode == "trash"
         projects = self._repo.list_deleted() if in_trash else self._repo.list_all()
@@ -152,10 +150,11 @@ class ProjectsPage(QWidget):
             card_layout.addStretch()
 
             if in_trash:
-                date_str = f"删除于 {(proj.deleted_at or '')[:10]}"
+                deleted = (proj.deleted_at or "")[:10]
+                if deleted:
+                    card_layout.addWidget(Caption(f"删除于 {deleted}"))
             else:
-                date_str = (proj.created_at or "")[:10]
-            card_layout.addWidget(Caption(date_str))
+                card_layout.addWidget(Caption((proj.created_at or "")[:10]))
 
             self._grid.addWidget(btn, i // cols, i % cols)
 
@@ -203,6 +202,7 @@ class ProjectsPage(QWidget):
             danger=True,
         ):
             self._repo.hard_delete(pid)
+            self.project_deleted.emit(pid)
             self.refresh()
 
     def _confirm_empty_trash(self):
@@ -216,7 +216,10 @@ class ProjectsPage(QWidget):
             ok_text="清空回收站",
             danger=True,
         ):
+            pids = [p.id for p in self._repo.list_deleted()]
             self._repo.empty_trash()
+            for pid in pids:
+                self.project_deleted.emit(pid)
             self.refresh()
 
     def _confirm_delete(self, pid, name):
@@ -228,4 +231,5 @@ class ProjectsPage(QWidget):
             danger=True,
         ):
             self._repo.soft_delete(pid)
+            self.project_deleted.emit(pid)
             self.refresh()

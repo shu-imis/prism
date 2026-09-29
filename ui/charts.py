@@ -33,13 +33,13 @@ from ui.styles import (
 from ui.widgets import TipLabel, clear_layout
 
 # 折线图的指标系列：字段名、颜色、图例格式化（统一取色自数据可视化色板；
-# 标签统一取 core.constants.METRICS）
+# 标签与顺序统一取 core.constants.METRICS 规范）
 _SERIES = [
     ("inventory_level", CHART_BLUE, METRICS["inventory"], "{:.0f}"),
     ("cost_index", CHART_ORANGE, METRICS["cost"], "{:.0f}"),
+    ("delivery_delay", CHART_RED, METRICS["delay"], "{:.1f}"),
     ("service_level", CHART_GREEN, METRICS["service"], "{:.0%}"),
     ("profit_margin", CHART_PURPLE, METRICS["margin"], "{:+.0%}"),
-    ("delivery_delay", CHART_RED, METRICS["delay"], "{:.1f}"),
 ]
 
 
@@ -111,19 +111,22 @@ class MetricsChart(QWidget):
                 str(state.round),
             )
 
-        # 图例：色点 + 指标名 + 末值
+        # 图例：色点 + 指标名 + 末值（窄窗口放不下时截断尾部，不画出控件外）
         painter.setFont(mono)
         cursor = left
         y = 14
         for field, color, label, fmt in _SERIES:
             last = float(getattr(self._rounds[-1], field))
             text = f"{label} {fmt.format(last)}"
+            item_w = 12 + painter.fontMetrics().horizontalAdvance(text) + 18
+            if cursor + item_w > w - right:
+                break
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor(color))
             painter.drawEllipse(QPointF(cursor + 4, y), 3, 3)
             painter.setPen(QColor(TEXT_SECONDARY))
             painter.drawText(QRectF(cursor + 12, y - 7, 120, 14), Qt.AlignLeft, text)
-            cursor += 12 + painter.fontMetrics().horizontalAdvance(text) + 18
+            cursor += item_w
 
         painter.end()
 
@@ -152,7 +155,8 @@ class RadarChart(QWidget):
 
         w, h = self.width(), self.height()
         cx, cy = w / 2, h / 2 + 4
-        radius = min(w, h) / 2 - 34
+        # 小尺寸下限保护：轴标签偏移量以 radius 为分母，必须为正
+        radius = max(min(w, h) / 2 - 34, 8)
         dims = list(self._scores.keys())
         n = len(dims)
 
@@ -241,13 +245,7 @@ class SwimlaneGrid(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
     def set_rounds(self, rounds):
-        while self._layout.count():
-            item = self._layout.takeAt(0)
-            if item.widget():
-                item.widget().setVisible(False)
-                item.widget().deleteLater()
-            elif item.layout():
-                clear_layout(item.layout())
+        clear_layout(self._layout)
         rounds = [r for r in (rounds or []) if r.round > 0]  # 跳过初始状态轮
         if not rounds:
             return
@@ -304,7 +302,7 @@ class SwimlaneGrid(QWidget):
                 cell.setMinimumWidth(24)
                 cell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 if tip:
-                    color = ACTION_COLORS.get(action, "#E3E3DD")
+                    color = ACTION_COLORS.get(action, CHART_NEUTRAL)
                     cell.setStyleSheet(f"background:{color};")
                 else:
                     cell.setStyleSheet("background:transparent;")

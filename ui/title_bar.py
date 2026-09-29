@@ -12,6 +12,10 @@ from ui.styles import BG_PAGE, BG_SIDEBAR, BORDER, SIDEBAR_W, TEXT_PRIMARY, TEXT
 
 TITLE_BAR_H = 36
 
+# macOS 红绿灯：单颗直径与组内间距，按钮组宽度由这两个常量推算
+MAC_BTN_SIZE = 12
+MAC_BTN_SPACING = 8
+
 
 def _brand_qss(color: str) -> str:
     """标题栏品牌标签样式。"""
@@ -37,7 +41,7 @@ class _MacTraffic(QPushButton):
         self._symbol = symbol  # "close" | "min" | "max"
         self._group_hover = False
         self._active = True
-        self.setFixedSize(12, 12)
+        self.setFixedSize(MAC_BTN_SIZE, MAC_BTN_SIZE)
         self.setCursor(Qt.PointingHandCursor)
 
     def set_group_hover(self, on: bool):
@@ -109,9 +113,11 @@ class _WinButton(QPushButton):
 
     def enterEvent(self, event):
         self.set_hovered(True)
+        super().enterEvent(event)
 
     def leaveEvent(self, event):
         self.set_hovered(False)
+        super().leaveEvent(event)
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -236,11 +242,11 @@ class TitleBar(QWidget):
         btn_area = QWidget()
         bl = QHBoxLayout(btn_area)
         bl.setContentsMargins(0, 0, 0, 0)
-        bl.setSpacing(8)
+        bl.setSpacing(MAC_BTN_SPACING)
         bl.addWidget(close_btn)
         bl.addWidget(min_btn)
         bl.addWidget(max_btn)
-        btn_area.setFixedWidth(12 + 8 + 12 + 8 + 12)
+        btn_area.setFixedWidth(MAC_BTN_SIZE * 3 + MAC_BTN_SPACING * 2)
 
         # 左侧为侧栏延伸区（与 paintEvent 的色带同宽），红绿灯落在其上
         left = QWidget()

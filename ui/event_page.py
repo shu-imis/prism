@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -85,12 +85,12 @@ class NodeEditor(QWidget):
         card = Card(padding=PAD_MD)
 
         hdr = QHBoxLayout()
-        hdr.addWidget(Title(f"节点 {len(self._nodes) + 1}", 12))
+        title = Title(f"节点 {len(self._nodes) + 1}", 12)
+        hdr.addWidget(title)
         hdr.addStretch()
-        if len(self._nodes) >= 1:
-            rm = DangerBtn("删除")
-            rm.clicked.connect(lambda: self._remove(card))
-            hdr.addWidget(rm)
+        rm = DangerBtn("删除")
+        rm.clicked.connect(lambda: self._remove(card))
+        hdr.addWidget(rm)
         card.add_layout(hdr)
 
         row1 = QHBoxLayout()
@@ -109,19 +109,19 @@ class NodeEditor(QWidget):
 
         row2 = QHBoxLayout()
         row2.addWidget(QLabel("库存"))
-        inv = NumberInput(value=d.get("inventory", 50), min_val=0, max_val=100)
+        inv = NumberInput(value=int(d.get("inventory", 50)), min_val=0, max_val=100)
         row2.addWidget(inv)
 
         row2.addWidget(QLabel("交货周期"))
-        lead = NumberInput(value=d.get("lead_time", 2), min_val=0, max_val=10)
+        lead = NumberInput(value=int(d.get("lead_time", 2)), min_val=0, max_val=10)
         row2.addWidget(lead)
 
         row2.addWidget(QLabel("产能上限"))
-        cap = NumberInput(value=d.get("capacity", 100), min_val=0, max_val=200)
+        cap = NumberInput(value=int(d.get("capacity", 100)), min_val=0, max_val=200)
         row2.addWidget(cap)
 
         row2.addWidget(QLabel("成本指数"))
-        cost_idx = NumberInput(value=d.get("cost_index", d.get("cost", 50)), min_val=0, max_val=100)
+        cost_idx = NumberInput(value=int(d.get("cost_index", d.get("cost", 50))), min_val=0, max_val=100)
         row2.addWidget(cost_idx)
         row2.addStretch()
         card.add_layout(row2)
@@ -141,19 +141,24 @@ class NodeEditor(QWidget):
 
         self._nodes.append({
             "card": card,
+            "title": title,
+            "remove": rm,
             "name": name,
             "type": type_seg,
             "inventory": inv,
             "lead_time": lead,
             "capacity": cap,
-            "cost": cost_idx,
+            "cost_index": cost_idx,
             "upstream": up,
             "downstream": down,
         })
-        self._layout.insertWidget(self._layout.count(), card)
+        self._layout.addWidget(card)
         self._update_nums()
 
     def _remove(self, card):
+        # 至少保留一个节点：仅剩一个时删除入口已禁用，这里兜底拒止
+        if len(self._nodes) <= 1:
+            return
         for i, nd in enumerate(self._nodes):
             if nd["card"] is card:
                 self._layout.removeWidget(card)
@@ -163,8 +168,10 @@ class NodeEditor(QWidget):
         self._update_nums()
 
     def _update_nums(self):
+        removable = len(self._nodes) > 1
         for i, nd in enumerate(self._nodes):
-            nd["card"].findChild(QLabel).setText(f"节点 {i + 1}")
+            nd["title"].setText(f"节点 {i + 1}")
+            nd["remove"].setEnabled(removable)
 
     def get_nodes(self):
         result = []
@@ -175,7 +182,7 @@ class NodeEditor(QWidget):
                 "inventory": nd["inventory"].value(),
                 "lead_time": nd["lead_time"].value(),
                 "capacity": nd["capacity"].value(),
-                "cost_index": nd["cost"].value(),
+                "cost_index": nd["cost_index"].value(),
                 "upstream": _parse_refs(nd["upstream"].text()),
                 "downstream": _parse_refs(nd["downstream"].text()),
             })
@@ -277,15 +284,17 @@ class EventPage(QWidget):
         param_card = Card()
         hr = QHBoxLayout()
         hr.addWidget(QLabel("初始库存水平"))
-        self._inv = NumberInput(value=75, min_val=0, max_val=100)
+        self._inv = NumberInput(value=int(DEFAULT_INITIAL_INVENTORY), min_val=0, max_val=100)
         hr.addWidget(self._inv)
 
         hr.addWidget(QLabel("基线成本指数"))
-        self._cost = NumberInput(value=50, min_val=0, max_val=100)
+        self._cost = NumberInput(value=int(DEFAULT_BASELINE_COST), min_val=0, max_val=100)
         hr.addWidget(self._cost)
 
         hr.addWidget(QLabel("基线服务水平"))
-        self._svc = DecimalInput(value=0.85, min_val=0, max_val=1, step=0.05, decimals=2)
+        self._svc = DecimalInput(
+            value=DEFAULT_BASELINE_SERVICE_LEVEL, min_val=0, max_val=1, step=0.05, decimals=2
+        )
         hr.addWidget(self._svc)
         hr.addStretch()
         param_card.add_layout(hr)
@@ -313,8 +322,8 @@ class EventPage(QWidget):
         self._title.setText(s.get("title", ""))
         self._industry.setText(s.get("industry", ""))
         self._bg.setPlainText(s.get("background", ""))
-        self._inv.setValue(s.get("initial_inventory", DEFAULT_INITIAL_INVENTORY))
-        self._cost.setValue(s.get("baseline_cost", DEFAULT_BASELINE_COST))
+        self._inv.setValue(int(s.get("initial_inventory", DEFAULT_INITIAL_INVENTORY)))
+        self._cost.setValue(int(s.get("baseline_cost", DEFAULT_BASELINE_COST)))
         self._svc.setValue(s.get("baseline_service_level", DEFAULT_BASELINE_SERVICE_LEVEL))
         self._node_editor.set_nodes(s.get("nodes", DEFAULT_NODES))
 
@@ -324,11 +333,12 @@ class EventPage(QWidget):
         self._render_imported_docs()
         self._render_knowledge_base()
         self._title.clear()
+        self._industry.clear()
         self._bg.clear()
         self._node_editor.set_nodes(DEFAULT_NODES)
-        self._inv.setValue(75)
-        self._cost.setValue(50)
-        self._svc.setValue(0.85)
+        self._inv.setValue(int(DEFAULT_INITIAL_INVENTORY))
+        self._cost.setValue(int(DEFAULT_BASELINE_COST))
+        self._svc.setValue(DEFAULT_BASELINE_SERVICE_LEVEL)
 
     def _import_docs(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -337,16 +347,20 @@ class EventPage(QWidget):
         if not files:
             return
         # 大文件读取耗时，放 worker 线程执行避免冻结界面
+        pid = self._pid
         run_ai_task_with_button(
             self,
             self._import_btn,
             "导入中…",
             lambda: import_documents(files),
-            self._on_docs_imported,
+            lambda imported: self._on_docs_imported(imported, pid),
             self._on_docs_import_error,
         )
 
-    def _on_docs_imported(self, imported):
+    def _on_docs_imported(self, imported, pid):
+        # 等待期间用户可能已切换项目：pid 不匹配则丢弃，避免旧文档串进新项目
+        if pid != self._pid:
+            return
         self._imported = imported
         self._render_imported_docs()
         self.log(f"已导入 {len(self._imported)} 个文档")
@@ -453,8 +467,8 @@ class EventPage(QWidget):
             self._industry.setText(sc["industry"])
         if sc.get("background"):
             self._bg.setPlainText(sc["background"])
-        self._inv.setValue(sc.get("initial_inventory", DEFAULT_INITIAL_INVENTORY))
-        self._cost.setValue(sc.get("baseline_cost", DEFAULT_BASELINE_COST))
+        self._inv.setValue(int(sc.get("initial_inventory", DEFAULT_INITIAL_INVENTORY)))
+        self._cost.setValue(int(sc.get("baseline_cost", DEFAULT_BASELINE_COST)))
         self._svc.setValue(sc.get("baseline_service_level", DEFAULT_BASELINE_SERVICE_LEVEL))
         if sc.get("nodes"):
             self._node_editor.set_nodes(sc["nodes"])
@@ -463,8 +477,15 @@ class EventPage(QWidget):
     def _on_ai_error(self, err):
         self.log(f"AI 分析失败：{err}", is_error=True)
 
+    def save(self):
+        """公开保存入口（供工作区导航按钮调用）。"""
+        self._save()
+
     def _save(self):
         t = self._title.text().strip()
+        if not t:
+            self.log("请填写供应链名称", is_error=True)
+            return
         if len(t) > 80:
             self.log("名称请勿超过 80 字", is_error=True)
             return
@@ -505,7 +526,7 @@ class EventPage(QWidget):
             # 场景变更使旧仿真结果失效：清轮次/检查点/报告并回到草稿
             if project.status in ("completed", "interrupted"):
                 invalidate_simulation_results(self._pid)
-            p = repo.update_scenario(self._pid, sc)
+            p = repo.update_scenario(self._pid, sc, name=t)
             pid = p.id
         else:
             p = repo.create(t, sc)

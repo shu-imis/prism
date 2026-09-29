@@ -40,6 +40,15 @@ ACTION_LABELS_SHORT: Final[dict[str, str]] = {
     "intervene": "监管介入",
 }
 
+# 4 种决策倾向（key → 中文标签），顺序即 UI 分段控件选项顺序。合法性校验的唯一来源：
+# llm/analysis.py 的 VALID_STANCES 与 ui/persona_page.py 的选项列表均由此派生
+STANCES: Final[list[tuple[str, str]]] = [
+    ("aggressive", "激进"),
+    ("cautious", "保守"),
+    ("cooperative", "协作"),
+    ("defensive", "防御"),
+]
+
 # 7 种供应链节点类型（key → 中文标签），列表顺序即行为体 id 顺序（1..7）
 NODE_TYPES: Final[list[tuple[str, str]]] = [
     ("supplier", "原材料供应商"),

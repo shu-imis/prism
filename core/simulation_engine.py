@@ -1,7 +1,8 @@
 """仿真引擎 —— 真实 LLM 多行为体主循环。"""
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from enum import Enum
 import difflib
@@ -61,7 +62,8 @@ AGENT_ALLOWED_ACTIONS: dict[int, set[str]] = {
     7: {"maintain", "intervene"},
 }
 
-# 场景未定义节点链路时的类型级兜底链（与 AGENT_NODE_TYPES 主链一致）
+# 类型级兜底主链（上游→下游）：场景未定义节点链路时，信息流方位
+# （_type_level_links）与链路推断（_infer_node_links）共用这一份顺序
 _FALLBACK_TYPE_CHAIN = ("supplier", "manufacturer", "distributor", "retailer", "consumer")
 
 
@@ -128,13 +130,13 @@ class AgentTurn:
     warning: str = ""
 
     def to_dict(self) -> dict[str, Any]:
+        # stance/speech 为单一序列化键；db 的 agent_messages 写入消费 stance
         return {
             "agent_id": self.agent_id,
             "agent_name": self.agent_name,
             "stance": self.decision_stance,
             "role": self.role,
-            "decision_stance": self.decision_stance,
-            "content": self.speech,
+            "speech": self.speech,
             "action_type": self.action_type,
             "reaction_to": self.reaction_to,
             "metrics": {
@@ -146,7 +148,6 @@ class AgentTurn:
                 "pressure_change": self.pressure_change,
                 "decision_shift": self.decision_shift,
                 "risk_description": self.risk_description,
-                "response_summary": self.response_summary,
                 "skipped": self.skipped,
                 "error_message": self.error_message,
                 "warning": self.warning,
@@ -172,6 +173,8 @@ class SimulationEngine:
         self._progress_callback: Callable[[int, int, str], None] = None
         self._round_callback: RoundCallback | None = None
         self._resume_payload: dict[str, Any] | None = None
+        # 事件检测器在 _run_simulation 中创建，供检查点续传
+        self._detector: EventDetector | None = None
 
     def configure(
         self,
@@ -198,6 +201,7 @@ class SimulationEngine:
         self.state.scenario = scenario
         self.state.total_rounds = self.state.config.max_rounds
         self.state.status = SimStatus.IDLE
+        self.state.error_message = ""
         self.state.project_id = project_id
         self.state.simulation_record = simulation_record
         self.state.round_repository = round_repository
@@ -223,7 +227,6 @@ class SimulationEngine:
             raise ValueError("至少需要配置一个行为体。")
 
         self.state.status = SimStatus.RUNNING
-        self._detector = None  # 事件检测器在 _run_simulation 中创建，供检查点续传
 
         try:
             rounds = self._run_simulation()
@@ -251,7 +254,7 @@ class SimulationEngine:
                 rounds = [WorldState.from_dict(resume["last_state"])]
             start_round = int(resume.get("last_round", 0)) + 1
             ws = rounds[-1] if rounds else self._initial_world_state(agents)
-            # 以检查点保存时的 max_rounds 为准：配置改小后恢复不应「零轮直接完成」
+            # 续传的轮数上界以检查点保存的 max_rounds 为准（保存时刻的配置优先于当前配置）
             max_rounds = int(resume.get("max_rounds") or self.state.config.max_rounds)
             self.state.total_rounds = max_rounds
             # 续传事件检测器的连续计数，跨断点的「连续两轮」检测链不断裂
@@ -309,7 +312,7 @@ class SimulationEngine:
                             turn = self._skipped_turn(agent, str(exc))
                         self._apply_agent_turn(agent, turn)
                         turns.append(turn)
-                except TimeoutError:
+                except FuturesTimeoutError:
                     for future, agent in future_to_agent.items():
                         if future in seen:
                             continue
@@ -904,10 +907,11 @@ class SimulationEngine:
 
     def _emit_callbacks(self, state: WorldState, messages: list[dict[str, Any]]) -> None:
         if self._progress_callback:
+            # 分母统一用 total_rounds：续传时它与 config.max_rounds 可能不一致
             self._progress_callback(
                 state.round,
                 self.state.total_rounds,
-                f"第 {state.round}/{self.state.config.max_rounds} 轮",
+                f"第 {state.round}/{self.state.total_rounds} 轮",
             )
         if self._round_callback:
             self._round_callback(state, messages)
@@ -1006,10 +1010,10 @@ class SimulationEngine:
         scenario = self.state.scenario or Scenario()
         nodes: list[NodeState] = []
         for raw in scenario.nodes or []:
-            inventory = clamp(float(raw.get("inventory", scenario.initial_inventory)), 0.0, 100.0)
-            capacity = max(0.0, float(raw.get("capacity", 0.0)))
-            lead_time = max(0.0, float(raw.get("lead_time", 0.0)))
-            cost_index = clamp(float(raw.get("cost_index", scenario.baseline_cost)), 0.0, 100.0)
+            inventory = clamp_float(raw.get("inventory"), 0.0, 100.0, scenario.initial_inventory)
+            capacity = clamp_float(raw.get("capacity"), 0.0, float("inf"), 0.0)
+            lead_time = clamp_float(raw.get("lead_time"), 0.0, float("inf"), 0.0)
+            cost_index = clamp_float(raw.get("cost_index"), 0.0, 100.0, scenario.baseline_cost)
             node = NodeState(
                 name=str(raw.get("name", "node")),
                 node_type=str(raw.get("type", "unknown")).strip().lower(),
@@ -1185,13 +1189,8 @@ class SimulationEngine:
 
     @staticmethod
     def _infer_node_links(node_states: list[NodeState]) -> dict[str, set[str]]:
-        order_rank = {
-            "supplier": 0,
-            "manufacturer": 1,
-            "distributor": 2,
-            "retailer": 3,
-            "consumer": 4,
-        }
+        # 主链顺序与 _FALLBACK_TYPE_CHAIN 同源，避免两处各维护一份
+        order_rank = {node_type: rank for rank, node_type in enumerate(_FALLBACK_TYPE_CHAIN)}
         chain_nodes = [node for node in node_states if node.node_type in order_rank]
         chain_nodes.sort(key=lambda node: (order_rank[node.node_type], node.name))
         links: dict[str, set[str]] = {}

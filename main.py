@@ -7,13 +7,10 @@ import re
 import sys
 from pathlib import Path
 
-# 确保项目根目录在 sys.path 中（支持直接从仓库目录运行）
+# 确保仓库根目录在 sys.path 中（支持直接从仓库目录运行）
 _APP_ROOT = Path(__file__).resolve().parent
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_APP_ROOT) not in sys.path:
     sys.path.insert(0, str(_APP_ROOT))
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
 
 # PyInstaller 冻结后资源文件位于 sys._MEIPASS，开发时位于源码目录
 _IS_FROZEN = getattr(sys, "frozen", False)

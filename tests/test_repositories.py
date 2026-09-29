@@ -13,6 +13,7 @@ from db.models import (
     CheckpointRepository,
     KnowledgeRepository,
     from_json,
+    invalidate_simulation_results,
     is_valid_json,
 )
 
@@ -130,9 +131,70 @@ class RepositoryTests(unittest.TestCase):
             self.assertIsNotNone(latest)
             self.assertEqual(latest.id, checkpoint_id)
             self.assertEqual(latest.engine_state["last_round"], 2)
-            self.assertEqual(len(repo.list_unfinished()), 1)
             repo.delete_for_project(project.id)
             self.assertIsNone(repo.latest_for_project(project.id))
+            db.close()
+
+    def test_delete_for_simulation_cascades_agent_messages(self) -> None:
+        """delete_for_simulation 只删轮次，发言经外键级联一并清除。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(Path(tmp) / "prism.db")
+            db.migrate()
+            project = ProjectRepository(db).create("Demo", {})
+            simulation = SimulationRepository(db).create(project.id)
+            round_repo = SimulationRoundRepository(db)
+            round_repo.save(
+                project_id=project.id,
+                simulation_id=simulation.id,
+                round_index=1,
+                simulated_hour=1,
+                inventory_level=70.0,
+                cost_index=55.0,
+                delivery_delay=0.5,
+                state={},
+                agent_messages=[{"agent_name": "零售商", "stance": "neutral", "speech": "促销。"}],
+            )
+
+            round_repo.delete_for_simulation(simulation.id)
+
+            self.assertEqual(round_repo.list_by_simulation(simulation.id), [])
+            row = db.conn.execute("SELECT COUNT(*) FROM agent_messages").fetchone()
+            self.assertEqual(row[0], 0)
+            db.close()
+
+    def test_invalidate_simulation_results(self) -> None:
+        """作废主仿真：轮次/发言/检查点/报告清空，项目状态回退 draft，仿真锚点保留。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(Path(tmp) / "prism.db")
+            db.migrate()
+            project_repo = ProjectRepository(db)
+            project = project_repo.create("Demo", {"industry": "electronics"})
+            project_repo.update_scenario(project.id, {"industry": "electronics"}, status="completed")
+            simulation = SimulationRepository(db).create(project.id)
+            SimulationRoundRepository(db).save(
+                project_id=project.id,
+                simulation_id=simulation.id,
+                round_index=1,
+                simulated_hour=1,
+                inventory_level=70.0,
+                cost_index=55.0,
+                delivery_delay=0.5,
+                state={},
+                agent_messages=[{"agent_name": "零售商", "stance": "neutral", "speech": "促销。"}],
+            )
+            ReportRepository(db).save(project_id=project.id, title="报告", markdown="md", summary={})
+            CheckpointRepository(db).save(
+                project_id=project.id, simulation_id=simulation.id,
+                last_round=1, engine_state={},
+            )
+
+            invalidate_simulation_results(project.id, db)
+
+            self.assertEqual(project_repo.get_by_id(project.id).status, "draft")
+            self.assertIsNotNone(SimulationRepository(db).get_main(project.id))
+            for table in ("simulation_rounds", "agent_messages", "checkpoints", "reports"):
+                row = db.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                self.assertEqual(row[0], 0, f"{table} 应被清空")
             db.close()
 
     def test_report_repository_delete_for_project(self) -> None:
@@ -181,7 +243,7 @@ class RepositoryTests(unittest.TestCase):
                 cost_index=55.0,
                 delivery_delay=0.5,
                 state={},
-                agent_messages=[{"agent_name": "零售商", "content": "促销。"}],
+                agent_messages=[{"agent_name": "零售商", "speech": "促销。"}],
             )
             report_repo.save(project_id=project.id, title="报告", markdown="md", summary={})
             checkpoint_repo.save(

@@ -10,6 +10,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from typing import Callable, TypeVar
+
 # ============================================================
 # 路径常量
 # ============================================================
@@ -36,18 +38,13 @@ def _default_db_path() -> Path:
 DB_PATH = _default_db_path()
 
 
-def _env_int(name: str, default: int) -> int:
-    """读取整型环境变量；空串/非数字等非法值回退默认（避免 import 期崩溃）。"""
-    try:
-        return int(os.getenv(name, str(default)))
-    except (TypeError, ValueError):
-        return default
+T = TypeVar("T", int, float)
 
 
-def _env_float(name: str, default: float) -> float:
-    """读取浮点环境变量；空串/非数字等非法值回退默认（避免 import 期崩溃）。"""
+def _env_number(name: str, default: T, parse: Callable[[str], T]) -> T:
+    """读取数值环境变量；空串/非数字等非法值回退默认（避免 import 期崩溃）。"""
     try:
-        return float(os.getenv(name, str(default)))
+        return parse(os.getenv(name, str(default)))
     except (TypeError, ValueError):
         return default
 
@@ -82,17 +79,19 @@ class AppConfig:
 
     @classmethod
     def from_env(cls) -> AppConfig:
-        """从环境变量加载配置（.env 兜底）"""
+        """从环境变量加载配置（.env 兜底）；默认值以 dataclass 字段为准"""
+        sim_defaults = SimulationDefaults()
+        llm_defaults = LLMDefaults()
         sim = SimulationDefaults(
-            max_rounds=_env_int("SIM_MAX_ROUNDS", 12),
-            round_timeout=_env_int("SIM_ROUND_TIMEOUT", 120),
+            max_rounds=_env_number("SIM_MAX_ROUNDS", sim_defaults.max_rounds, int),
+            round_timeout=_env_number("SIM_ROUND_TIMEOUT", sim_defaults.round_timeout, int),
         )
         llm = LLMDefaults(
-            default_model=os.getenv("LLM_DEFAULT_MODEL", "gpt-5.6-sol"),
-            temperature=_env_float("LLM_TEMPERATURE", 0.7),
-            decision_temperature=_env_float("LLM_DECISION_TEMPERATURE", 0.35),
-            max_retries=_env_int("LLM_MAX_RETRIES", 3),
-            request_timeout=_env_int("LLM_REQUEST_TIMEOUT", 30),
+            default_model=os.getenv("LLM_DEFAULT_MODEL", llm_defaults.default_model),
+            temperature=_env_number("LLM_TEMPERATURE", llm_defaults.temperature, float),
+            decision_temperature=_env_number("LLM_DECISION_TEMPERATURE", llm_defaults.decision_temperature, float),
+            max_retries=_env_number("LLM_MAX_RETRIES", llm_defaults.max_retries, int),
+            request_timeout=_env_number("LLM_REQUEST_TIMEOUT", llm_defaults.request_timeout, int),
         )
         return cls(sim=sim, llm=llm)
 

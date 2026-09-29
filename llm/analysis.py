@@ -16,7 +16,7 @@ from typing import Any
 from config import app_config
 from core import clamp_float, clamp_int
 from core.agent import AGENT_TEMPLATES
-from core.constants import NODE_TYPES
+from core.constants import NODE_TYPES, STANCES
 from core.scenario_parser import (
     DEFAULT_BASELINE_COST,
     DEFAULT_BASELINE_SERVICE_LEVEL,
@@ -38,11 +38,18 @@ MAX_DOC_CHARS = 30000
 # 合法节点类型（由 core.constants.NODE_TYPES 派生）
 VALID_NODE_TYPES = {key for key, _ in NODE_TYPES}
 
-# 与 ui/persona_page.py STANCES 一致的合法决策倾向
-VALID_STANCES = {"aggressive", "cautious", "cooperative", "defensive"}
+# 合法决策倾向（core.constants.STANCES 的派生别名，供本模块校验用）
+VALID_STANCES = frozenset(key for key, _ in STANCES)
 
 MAX_NODES = 8
 MAX_SEED_EVENTS = 3
+
+# 传给 LLM 的时间线条目上限
+MAX_TIMELINE_ENTRIES = 40
+
+# 标题硬上限：prompt 要求模型 ≤30 字（见 SCENARIO_EXTRACTION_SYSTEM），
+# 校验层放宽到 80 作为截断安全网，两处口径有意不同
+MAX_TITLE_CHARS = 80
 
 
 def extract_scenario_from_docs(client: LLMClient, docs_text: str) -> dict[str, Any]:
@@ -99,12 +106,12 @@ def analyze_evolution(
     """
     timeline = build_timeline_entries(rounds or [])
     timeline_lines = []
-    for entry in timeline[:40]:
+    for entry in timeline[:MAX_TIMELINE_ENTRIES]:
         if entry["kind"] == "event":
-            timeline_lines.append(f"周期 {entry['round']} 事件：{entry['description']}")
+            timeline_lines.append(f"周期 {entry.get('round')} 事件：{entry.get('description', '')}")
         else:
             timeline_lines.append(
-                f"周期 {entry['start']}-{entry['end']} 行为体{entry['agent_id']}"
+                f"周期 {entry.get('start')}-{entry.get('end')} 行为体{entry.get('agent_id')}"
                 f"【{entry.get('action_type', '')}】：{entry.get('summary', '')}"
             )
 
@@ -170,7 +177,7 @@ def _validate_scenario(data: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("AI 未能从文档中抽取出供应链背景")
 
     return {
-        "title": str(data.get("title", "")).strip()[:80],
+        "title": str(data.get("title", "")).strip()[:MAX_TITLE_CHARS],
         "industry": str(data.get("industry", "")).strip()[:40],
         "background": background,
         "nodes": nodes,
@@ -228,11 +235,7 @@ def _validate_evolution_analysis(data: dict[str, Any]) -> dict[str, Any]:
     if not analysis:
         raise ValueError("AI 未返回演化分析内容")
 
-    recommendations = [
-        str(item).strip()
-        for item in data.get("recommendations", [])
-        if str(item).strip()
-    ][:5] if isinstance(data.get("recommendations"), list) else []
+    recommendations = _str_list(data.get("recommendations"))[:5]
 
     return {
         "evolution_analysis": analysis,

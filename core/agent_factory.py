@@ -20,7 +20,6 @@ class AgentFactory:
                 name=tmpl["name"],
                 role=tmpl["role"],
                 decision_stance=tmpl["decision_stance"],
-                base_stance=tmpl["decision_stance"],
                 influence=tmpl["influence"],
                 activity=tmpl["activity"],
                 active_cycles=tmpl["active_cycles"],
@@ -40,7 +39,6 @@ class AgentFactory:
                 continue
             if "stance" in config:
                 agent.decision_stance = config["stance"]
-                agent.base_stance = config["stance"]
             if "activity" in config:
                 agent.activity = config["activity"]
             if "influence" in config:

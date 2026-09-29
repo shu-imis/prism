@@ -33,25 +33,29 @@ class ReportExporter:
     @staticmethod
     def to_markdown(report: SimulationReport, rounds: list[WorldState] | None = None) -> str:
         resilience = report.scores.get(SCORE_KEY_RESILIENCE, 0)
+        # 指标名统一取 METRICS 词表；韧性评分无首末差值，末态列展示评分
+        metric_rows = (
+            (METRICS["inventory"], f"{report.final_inventory:.1f}", f"{report.inventory_delta:+.1f}"),
+            (METRICS["cost"], f"{report.final_cost:.1f}", f"{report.cost_delta:+.1f}"),
+            (METRICS["delay"], f"{report.final_delivery_delay:.1f} 周期", f"{report.delay_delta:+.1f}"),
+            (METRICS["service"], f"{report.final_service_level:.0%}", f"{report.service_delta:+.1%}"),
+            (METRICS["margin"], f"{report.final_profit_margin:+.1%}", f"{report.margin_delta:+.1%}"),
+            (SCORE_KEY_RESILIENCE, f"{resilience:.1f}", "—"),
+        )
         lines = [
             f"# {_inline(report.project_name)} - 供应链演化仿真报告",
             "",
             "## 演化概述",
-            report.evolution_summary or "暂无摘要。",
+            _inline(report.evolution_summary) or "暂无摘要。",
             "",
             "## 供应链背景",
-            report.scenario_background or "未填写。",
+            _inline(report.scenario_background) or "未填写。",
             "",
             "## 指标变化",
             "| 指标 | 末态 | 首末变化 |",
             "| --- | ---: | ---: |",
-            f"| 库存水平 | {report.final_inventory:.1f} | {report.inventory_delta:+.1f} |",
-            f"| 成本指数 | {report.final_cost:.1f} | {report.cost_delta:+.1f} |",
-            f"| 交付延迟 | {report.final_delivery_delay:.1f} 周期 | {report.delay_delta:+.1f} |",
-            f"| 服务水平 | {report.final_service_level:.0%} | {report.service_delta:+.1%} |",
-            f"| 利润率 | {report.final_profit_margin:+.1%} | {report.margin_delta:+.1%} |",
-            f"| {SCORE_KEY_RESILIENCE} | {resilience:.1f} | — |",
         ]
+        lines.extend(f"| {name} | {final} | {delta} |" for name, final, delta in metric_rows)
 
         if rounds:
             lines.extend(["", "## 指标演化数据", ""])
@@ -61,14 +65,15 @@ class ReportExporter:
 
         lines.extend(["", "## 六维评估"])
         lines.extend(f"- {key}：{value:.1f}" for key, value in report.scores.items())
-        lines.append(f"- 综合建议：{report.recommendation}")
+        lines.append(f"- 综合建议：{_inline(report.recommendation)}")
         lines.extend(["", "## 风险与建议"])
         if report.risks:
-            lines.extend(f"- {risk}" for risk in report.risks)
+            lines.extend(f"- {_inline(risk)}" for risk in report.risks)
         else:
             lines.append("- 暂无明显高风险信号")
 
         ai = report.ai_analysis or {}
+        # AI 叙述段落保留原始换行（多段落结构）；单行列表项过 _inline
         if ai.get("evolution_analysis"):
             lines.extend(["", "## AI 综合分析", "", ai["evolution_analysis"]])
             if ai.get("risk_analysis"):
@@ -76,7 +81,7 @@ class ReportExporter:
             recommendations = ai.get("recommendations", [])
             if recommendations:
                 lines.extend(["", "### AI 建议", ""])
-                lines.extend(f"- {item}" for item in recommendations)
+                lines.extend(f"- {_inline(item)}" for item in recommendations)
         lines.append("")
         return "\n".join(lines)
 

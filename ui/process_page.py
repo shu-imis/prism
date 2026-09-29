@@ -135,10 +135,10 @@ class ProcessPage(QWidget):
         self._smp.simulation_completed.connect(self._on_done)
         self._smp.state_changed.connect(self._update)
         self._smp.open_settings.connect(self.open_settings.emit)
-        # 将终端日志接口传给各页面
+        # 将终端日志出口注入各页面
         self._ep.log = self._log_msg
         self._sp.log = self._log_msg
-        self._smp.log = self._log_msg
+        self._smp.set_log_sink(self._log_msg)
 
     def _log_msg(self, msg, is_error=False):
         prefix = "×" if is_error else ">"
@@ -151,43 +151,43 @@ class ProcessPage(QWidget):
         self._advance()
 
     def _on_done(self, pid, r, res):
-        if pid != self._pid:
+        if pid is None or pid != self._pid:
             # 旧 worker 完成时当前可能已切换到其他项目，忽略避免跨项目串扰
             return
         self._log_msg("仿真已完成")
         self._update()
         self._rp.set_report(r, res, project_id=self._pid)
         # 持久化报告（主线程）；仿真轮次已由引擎自行落库
-        if self._pid:
-            try:
-                project = ProjectRepository().get_by_id(self._pid)
-                if project:
-                    ProjectRepository().update_scenario(
-                        self._pid, dict(project.scenario), status="completed"
-                    )
-                md = ReportExporter.to_markdown(r, res)
-                ReportRepository().save_or_update_latest(
-                    project_id=self._pid,
-                    title=f"{r.project_name} - 供应链演化仿真报告",
-                    markdown=md,
-                    summary=r.to_dict(),
+        try:
+            repo = ProjectRepository()
+            project = repo.get_by_id(self._pid)
+            if project:
+                repo.update_scenario(
+                    self._pid, dict(project.scenario), status="completed"
                 )
-            except Exception as e:
-                self._log_msg(f"数据保存失败：{e}")
+            md = ReportExporter.to_markdown(r, res)
+            ReportRepository().save_or_update_latest(
+                project_id=self._pid,
+                title=f"{r.project_name} - 供应链演化仿真报告",
+                markdown=md,
+                summary=r.to_dict(),
+            )
+        except Exception as e:
+            self._log_msg(f"数据保存失败：{e}")
 
     def _next_clicked(self):
         if self._step == 0:
-            self._ep._save()
+            self._ep.save()
         elif self._step == 1:
             if self._is_sim_done():
                 self._advance()
             else:
-                self._sp._save()
+                self._sp.save()
         elif self._step == 2:
             if self._is_sim_done():
                 self._advance()
             else:
-                self._smp._toggle()
+                self._smp.toggle()
 
     def _prev(self):
         if self._step > 0:
@@ -222,6 +222,10 @@ class ProcessPage(QWidget):
         if self._step == 2:
             if self._is_sim_done():
                 self._next.setText("下一步 →")
+            elif self._smp.is_running():
+                self._next.setText("⏸ 暂停")
+            elif self._smp.is_paused():
+                self._next.setText("▶ 继续")
             else:
                 self._next.setText("▶ 启动仿真")
             self._next.setVisible(True)
@@ -318,6 +322,13 @@ class ProcessPage(QWidget):
     def stop_worker(self):
         """安全停止仿真工作线程，供主窗口关闭时调用。"""
         self._smp.stop_worker()
+
+    def iter_ai_workers(self) -> list:
+        """各子页面运行中的 AI worker 合并列表（供主窗口关窗前统一兜底）。"""
+        workers = []
+        for page in (self._ep, self._sp, self._smp, self._rp):
+            workers.extend(getattr(page, "_ai_workers", None) or [])
+        return workers
 
     def reset(self):
         self._pid = None

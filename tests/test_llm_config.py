@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -10,6 +12,7 @@ from unittest import mock
 from core.agent_factory import AgentFactory
 from llm.client import LLMClient, LLMVendor, VendorSettings, parse_json_object, strip_model_noise
 import llm.analysis as llm_analysis
+import llm.client as llm_client
 import llm.config as llm_config
 from tests.helpers import FakeKeyring, make_json_client
 
@@ -158,6 +161,129 @@ class LLMConfigTests(unittest.TestCase):
 
         self.assertEqual(result, "完整文本")
         self.assertEqual(seen_max_tokens, [4096, 8192])
+
+    def test_truncation_escalation_does_not_leak_to_next_vendor(self) -> None:
+        """截断放大的 max_tokens=8192 只作用于本次调用，后续厂商仍用原始值。"""
+        client = LLMClient(
+            vendors=[
+                VendorSettings(LLMVendor.OPENAI, "m", "key"),
+                VendorSettings(LLMVendor.ANTHROPIC, "c", "key"),
+            ],
+            max_retries=0,
+        )
+        seen: list[tuple[str, int]] = []
+
+        def fake_call_sdk(self_, vendor, messages, options):
+            seen.append((vendor.vendor.value, options["max_tokens"]))
+            if vendor.vendor == LLMVendor.OPENAI and options["max_tokens"] < 8192:
+                return ("部分文本", True)
+            if vendor.vendor == LLMVendor.OPENAI:
+                raise RuntimeError("vendor unavailable")
+            return ("完整文本", False)
+
+        with mock.patch.object(LLMClient, "_call_sdk", fake_call_sdk):
+            result = client.chat("sys", "user")
+
+        self.assertEqual(result, "完整文本")
+        self.assertEqual(seen, [("openai", 4096), ("openai", 8192), ("anthropic", 4096)])
+
+    def test_sdk_not_installed_is_permanent_error(self) -> None:
+        """SDK 未安装（RuntimeError 包装 ImportError）不重试，直接切换下一厂商。"""
+        calls: list[str] = []
+
+        def fake_call_sdk(self_, vendor, messages, options):
+            calls.append(vendor.vendor.value)
+            if vendor.vendor == LLMVendor.OPENAI:
+                exc = RuntimeError("openai 包未安装。运行: pip install openai")
+                exc.__cause__ = ImportError("No module named 'openai'")
+                raise exc
+            return ('{"ok": true}', False)
+
+        client = LLMClient(
+            vendors=[
+                VendorSettings(LLMVendor.OPENAI, "m", "key"),
+                VendorSettings(LLMVendor.ANTHROPIC, "c", "key"),
+            ],
+            max_retries=3,
+        )
+        with mock.patch.object(LLMClient, "_call_sdk", fake_call_sdk):
+            result = client.chat_json("只返回 JSON", "ping")
+
+        self.assertTrue(result["ok"])
+        # openai 只尝试一次（不重试），随后切到 anthropic
+        self.assertEqual(calls, ["openai", "anthropic"])
+
+    def test_sdk_client_cache_key_includes_timeout(self) -> None:
+        """不同 timeout 不复用同一 SDK 客户端实例。"""
+        created: list[dict] = []
+
+        class _FakeCompletions:
+            def create(self, **request):
+                return types.SimpleNamespace(
+                    choices=[types.SimpleNamespace(
+                        message=types.SimpleNamespace(content="ok"), finish_reason="stop",
+                    )]
+                )
+
+        class _FakeOpenAI:
+            def __init__(self, **kwargs):
+                created.append(kwargs)
+                self.chat = types.SimpleNamespace(completions=_FakeCompletions())
+
+        fake_module = types.ModuleType("openai")
+        fake_module.OpenAI = _FakeOpenAI
+
+        llm_client._client_cache.clear()
+        try:
+            with mock.patch.dict(sys.modules, {"openai": fake_module}):
+                client30 = LLMClient(vendors=[VendorSettings(LLMVendor.OPENAI, "m", "k")], timeout=30)
+                client60 = LLMClient(vendors=[VendorSettings(LLMVendor.OPENAI, "m", "k")], timeout=60)
+                client30.chat("s", "u")
+                client30.chat("s", "u")
+                client60.chat("s", "u")
+        finally:
+            llm_client._client_cache.clear()
+
+        self.assertEqual(len(created), 2)
+        self.assertEqual({kwargs["timeout"] for kwargs in created}, {30, 60})
+
+    def test_anthropic_merges_system_messages_and_skips_non_text_blocks(self) -> None:
+        """多条 system 合并为一条；响应中的非 text block 不参与文本拼接。"""
+        captured: dict = {}
+
+        class _FakeMessages:
+            def create(self, **kwargs):
+                captured.update(kwargs)
+                return types.SimpleNamespace(
+                    content=[
+                        types.SimpleNamespace(text="第一部分"),
+                        types.SimpleNamespace(type="thinking"),  # 非 text block
+                        types.SimpleNamespace(text="第二部分"),
+                    ],
+                    stop_reason="end_turn",
+                )
+
+        class _FakeAnthropic:
+            def __init__(self, **kwargs):
+                self.messages = _FakeMessages()
+
+        fake_module = types.ModuleType("anthropic")
+        fake_module.Anthropic = _FakeAnthropic
+
+        llm_client._client_cache.clear()
+        try:
+            with mock.patch.dict(sys.modules, {"anthropic": fake_module}):
+                client = LLMClient(vendors=[VendorSettings(LLMVendor.ANTHROPIC, "claude", "key")])
+                text = client.chat_messages([
+                    {"role": "system", "content": "规则一"},
+                    {"role": "system", "content": "规则二"},
+                    {"role": "user", "content": "你好"},
+                ])
+        finally:
+            llm_client._client_cache.clear()
+
+        self.assertEqual(captured["system"], "规则一\n规则二")
+        self.assertEqual(text, "第一部分\n第二部分")
 
     def test_strip_model_noise_variants(self) -> None:
         """strip_model_noise：大小写不敏感，兼容 <thinking> 变体。"""
