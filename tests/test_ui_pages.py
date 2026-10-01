@@ -178,5 +178,53 @@ class ProcessPageTests(unittest.TestCase):
         self.assertEqual(heal(has_checkpoint=False, has_data=False), "draft")
 
 
+class SimulationHistorySpeechTests(QtDbTestCase):
+    """发言回填回归：重开项目时日志须从 state_json 还原行为体发言。"""
+
+    def test_history_speeches_backfilled(self) -> None:
+        from core.agent_factory import AgentFactory
+        from ui.simulation_page import SimulationPage, _format_speech_line
+
+        page = self.track(SimulationPage())
+        state = {
+            "agent_states": {
+                "2": {
+                    "spoke": True,
+                    "speech": "加快备货。",
+                    "action_type": "replenish",
+                    "reaction_to": "none",
+                },
+                "1": {
+                    "spoke": True,
+                    "speech": "收紧供应。",
+                    "action_type": "adjust_supply",
+                    "reaction_to": "制造商",
+                },
+                "3": {"spoke": False, "speech": ""},
+            }
+        }
+        page._append_history_speeches(state)
+
+        name1 = AgentFactory.get_template(1)["name"]
+        name2 = AgentFactory.get_template(2)["name"]
+        self.assertEqual(
+            page._log.toPlainText().splitlines(),
+            [
+                _format_speech_line(name1, "adjust_supply", "制造商", "收紧供应。"),
+                _format_speech_line(name2, "replenish", "none", "加快备货。"),
+            ],
+        )
+
+    def test_history_speeches_tolerate_corrupt_state(self) -> None:
+        """损坏的 state_json（缺 agent_states / 键非数值）不回填也不抛错。"""
+        from ui.simulation_page import SimulationPage
+
+        page = self.track(SimulationPage())
+        page._append_history_speeches({})
+        page._append_history_speeches({"agent_states": "坏数据"})
+        page._append_history_speeches({"agent_states": {"x": {"spoke": True, "speech": "？"}}})
+        self.assertEqual(page._log.toPlainText(), "")
+
+
 if __name__ == "__main__":
     unittest.main()

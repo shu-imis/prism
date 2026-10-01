@@ -59,11 +59,16 @@ class Project:
 
 @dataclass(frozen=True)
 class Simulation:
-    """项目的主仿真锚点记录。"""
+    """项目的主仿真锚点记录。
+
+    scenario_json 预留给多次仿真对比：每次运行冻结一份场景快照，
+    写入逻辑随对比功能落地。
+    """
 
     id: int
     project_id: int
     name: str
+    scenario_json: str = "{}"
     created_at: str = ""
 
 
@@ -277,7 +282,7 @@ class SimulationRepository:
 
 
 class SimulationRoundRepository:
-    """仿真轮次与 Agent 发言持久化。"""
+    """仿真轮次持久化（行为体发言随 state_json 存于轮次内）。"""
 
     def __init__(self, db: Database | None = None):
         self.db = db or Database()
@@ -296,7 +301,6 @@ class SimulationRoundRepository:
         profit_margin: float = 0.0,
         resilience_score: float = 0.0,
         state: dict[str, Any],
-        agent_messages: list[dict[str, Any]] | None = None,
     ) -> SimulationRound:
         with self.db.transaction() as conn:
             conn.execute(
@@ -330,22 +334,6 @@ class SimulationRoundRepository:
                 ),
             )
             round_id = self._find_round_id(simulation_id, round_index)
-            conn.execute("DELETE FROM agent_messages WHERE round_id = ?", (round_id,))
-            for message in agent_messages or []:
-                conn.execute(
-                    """
-                    INSERT INTO agent_messages
-                        (round_id, agent_name, stance, content, metrics_json)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        round_id,
-                        str(message.get("agent_name", "")),
-                        str(message.get("stance", "neutral")),
-                        str(message.get("speech", "")),
-                        to_json(message.get("metrics", {})),
-                    ),
-                )
         saved = self.get_by_id(round_id)
         if saved is None:
             raise RuntimeError("仿真轮次保存后无法读取")
@@ -382,7 +370,7 @@ class SimulationRoundRepository:
         return [SimulationRound(**dict(row)) for row in rows]
 
     def delete_for_simulation(self, simulation_id: int) -> None:
-        """删除指定仿真记录的全部轮次；发言经 agent_messages 的外键级联一并清除。"""
+        """删除指定仿真记录的全部轮次。"""
         with self.db.transaction() as conn:
             conn.execute(
                 "DELETE FROM simulation_rounds WHERE simulation_id = ?",
@@ -519,7 +507,7 @@ class CheckpointRepository:
 def invalidate_simulation_results(project_id: int, db: Database | None = None) -> None:
     """作废旧仿真结果：场景或行为体配置变更后，历史仿真数据不再有效。
 
-    删除主仿真轮次（发言经外键级联清除）、检查点与报告，并把项目状态
+    删除主仿真轮次、检查点与报告，并把项目状态
     回退为 draft，供 Step1/Step2 保存时在 completed/interrupted 项目上调用。
     全部改动在单一事务内提交，避免部分生效的中间态。
     """
