@@ -24,8 +24,8 @@ from tests.helpers import make_always_active_agents, make_fake_llm_client
 
 
 class SimulationEngineTests(unittest.TestCase):
-    def test_agent_turn_to_dict_single_serialized_keys(self) -> None:
-        """AgentTurn 序列化只写 stance/speech 单键（db 消费 stance）。"""
+    def test_agent_turn_to_dict_serializes_consumed_keys(self) -> None:
+        """AgentTurn 序列化仅含对外消费键；引擎内部字段不外泄。"""
         turn = AgentTurn(
             agent_id=1,
             agent_name="原材料供应商",
@@ -35,11 +35,13 @@ class SimulationEngineTests(unittest.TestCase):
             response_summary="收紧供应承诺",
         )
         d = turn.to_dict()
-        self.assertEqual(d["stance"], "cautious")
+        self.assertEqual(d["agent_name"], "原材料供应商")
         self.assertEqual(d["speech"], "收紧供应承诺")
+        self.assertEqual(set(d["metrics"]), {"skipped", "error_message", "warning"})
+        self.assertNotIn("agent_id", d)
+        self.assertNotIn("stance", d)
+        self.assertNotIn("role", d)
         self.assertNotIn("decision_stance", d)
-        self.assertNotIn("content", d)
-        self.assertNotIn("response_summary", d["metrics"])
 
     def test_simulation_engine_runs_llm_rounds_and_events(self) -> None:
         """验证仿真引擎 LLM 多轮运行和事件检测。"""
@@ -193,7 +195,7 @@ class SimulationEngineTests(unittest.TestCase):
             )
             first_engine.run()
             # 检查点记录了保存时的 max_rounds=2，之后配置被改大到 5
-            checkpoint_id = checkpoint_repo.save(
+            checkpoint_repo.save(
                 project_id=project.id,
                 simulation_id=simulation_record.id,
                 last_round=1,
@@ -205,7 +207,7 @@ class SimulationEngineTests(unittest.TestCase):
                     "max_rounds": 2,
                 },
             )
-            checkpoint = checkpoint_repo.get_by_id(checkpoint_id)
+            checkpoint = checkpoint_repo.latest_for_project(project.id)
 
             second_engine = SimulationEngine(llm_client=make_fake_llm_client(), random_seed=1)
             second_engine.configure(

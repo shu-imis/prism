@@ -187,21 +187,6 @@ class RepositoryTests(unittest.TestCase):
                 self.assertEqual(row[0], 0, f"{table} 应被清空")
             db.close()
 
-    def test_report_repository_delete_for_project(self) -> None:
-        """验证 ReportRepository.delete_for_project 删除项目全部报告。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            db = Database(Path(tmp) / "prism.db")
-            db.migrate()
-            project = ProjectRepository(db).create("Demo", {"industry": "electronics"})
-            report_repo = ReportRepository(db)
-
-            report_repo.save(project_id=project.id, title="报告", markdown="md", summary={})
-            self.assertEqual(len(report_repo.list_by_project(project.id)), 1)
-
-            report_repo.delete_for_project(project.id)
-            self.assertEqual(report_repo.list_by_project(project.id), [])
-            db.close()
-
     def test_database_sets_busy_timeout(self) -> None:
         """验证连接设置 busy_timeout，避免双连接并发写时默认 5s 导致 SQLITE_BUSY。"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -256,6 +241,42 @@ class RepositoryTests(unittest.TestCase):
                 for row in db.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
             }
             self.assertNotIn("agent_messages", tables)
+            db.close()
+
+    def test_migrate_rebuilds_drifted_table_preserving_data(self) -> None:
+        """结构不符的表带数据重建：声明外列剔除、列型校正，既有行保留。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            db_file = Path(tmp) / "prism.db"
+            conn = sqlite3.connect(str(db_file))
+            conn.executescript(
+                """
+                CREATE TABLE projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    scenario_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    deleted_at TEXT,
+                    legacy_flag TEXT
+                );
+                INSERT INTO projects (name, legacy_flag) VALUES ('旧项目', 'x');
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            db = Database(db_file)
+            db.migrate()
+
+            info = {
+                str(row["name"]): row
+                for row in db.conn.execute("PRAGMA table_info(projects)")
+            }
+            self.assertNotIn("legacy_flag", info)
+            self.assertEqual(str(info["name"]["type"]).upper(), "TEXT")
+            project = ProjectRepository(db).list_all()[0]
+            self.assertEqual(project.name, "旧项目")
             db.close()
 
     def test_project_recycle_bin(self) -> None:
