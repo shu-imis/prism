@@ -66,7 +66,6 @@ class EventPageTests(QtDbTestCase):
         repo = ProjectRepository()
         p = repo.create("旧名", {"background": "背景"})
         page = self.track(EventPage())
-        page.log = lambda *args, **kwargs: None
         page.load_project(p.id)
 
         page._title.setText("新名")
@@ -75,10 +74,26 @@ class EventPageTests(QtDbTestCase):
         self.assertEqual(project.name, "新名")
         self.assertEqual(project.scenario["title"], "新名")
 
+    def test_save_creates_project_for_new_page(self) -> None:
+        """新建项目首次保存以表单内容建库并广播项目 id。"""
+        page = self.track(EventPage())
+        fired: list[int] = []
+        page.project_saved.connect(fired.append)
+
+        page._title.setText("新建项目")
+        page._bg.setPlainText("背景")
+        page._save()
+
+        projects = ProjectRepository().list_all()
+        self.assertEqual(len(projects), 1)
+        self.assertEqual(projects[0].name, "新建项目")
+        self.assertEqual(projects[0].scenario["background"], "背景")
+        self.assertEqual(fired, [projects[0].id])
+        self.assertEqual(page._pid, projects[0].id)
+
     def test_reset_clears_industry_and_restores_defaults(self) -> None:
         """reset 清空行业输入并恢复参数默认值。"""
         page = self.track(EventPage())
-        page.log = lambda *args, **kwargs: None
         page._industry.setText("电子制造")
         page._inv.setValue(10)
         page.reset()
@@ -89,7 +104,6 @@ class EventPageTests(QtDbTestCase):
     def test_docs_imported_result_dropped_after_project_switch(self) -> None:
         """导入完成回调的 pid 与当前项目不符时丢弃结果。"""
         page = self.track(EventPage())
-        page.log = lambda *args, **kwargs: None
         page._pid = 999  # 等待导入期间已切换到其他项目
         page._on_docs_imported(["旧项目文档"], pid=None)
         self.assertEqual(page._imported, [])

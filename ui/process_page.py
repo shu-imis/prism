@@ -152,7 +152,6 @@ class ProcessPage(QWidget):
     def _on_saved(self, pid):
         self._pid = pid
         self._saved_steps.add(self._step)
-        self._log_msg(f"项目已保存（#{pid}）")
         self._advance()
 
     def _on_done(self, pid, r, res):
@@ -184,10 +183,8 @@ class ProcessPage(QWidget):
         if self._step == 0:
             self._ep.save()
         elif self._step == 1:
-            if self._is_sim_done():
-                self._advance()
-            else:
-                self._sp.save()
+            # 统一走保存：无改动即纯导航，有改动交给保存流程处理
+            self._sp.save()
         elif self._step == 2:
             if self._is_sim_done():
                 self._advance()
@@ -210,7 +207,9 @@ class ProcessPage(QWidget):
         if not self._pid:
             return
         if self._step == 1:
-            self._sp.load_project(self._pid)
+            # 有未保存修改且仍是同一项目时不重载，避免静默丢弃编辑
+            if self._sp._pid != self._pid or not self._sp.has_unsaved_changes():
+                self._sp.load_project(self._pid)
         elif self._step == 2:
             self._smp.load_project(self._pid)
         elif self._step == 3:
@@ -249,6 +248,9 @@ class ProcessPage(QWidget):
     def _step_status(self) -> tuple[str, str]:
         """当前步骤的状态文案与颜色。"""
         if self._step in (0, 1):
+            page = self._ep if self._step == 0 else self._sp
+            if page.has_unsaved_changes():
+                return "编辑中", TEXT_MUTED
             if self._step in self._saved_steps:
                 return "已保存", COLOR_GREEN
             return "编辑中", TEXT_MUTED

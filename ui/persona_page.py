@@ -1,4 +1,6 @@
 """行为体性格配置"""
+import json
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -28,12 +30,14 @@ from ui.styles import (
 from ui.widgets import (
     Caption,
     Card,
+    ConfirmDialog,
     DangerBtn,
     DecimalInput,
     GhostBtn,
     Input,
     NumberInput,
     SegmentedControl,
+    StatusLabel,
     Title,
 )
 
@@ -48,6 +52,8 @@ class PersonaPage(QWidget):
         self._pid = None
         self._agent_cards = []
         self._seed_rows = []
+        self._form_baseline = None
+        self._discard_snapshot = None
         # 终端日志回调：默认空实现，由 ProcessPage 注入覆盖（单独实例化也能用）
         self.log = lambda *args, **kwargs: None
         self._build()
@@ -69,6 +75,8 @@ class PersonaPage(QWidget):
         header.addStretch()
         self._ai_btn = GhostBtn("AI 生成行为体配置")
         self._ai_btn.clicked.connect(self._ai_generate)
+        self._ai_status = StatusLabel()
+        header.addWidget(self._ai_status)
         header.addWidget(self._ai_btn)
         card.add_layout(header)
         card.add(Caption(
@@ -189,10 +197,12 @@ class PersonaPage(QWidget):
 
     def load_project(self, pid):
         self._pid = pid
+        self._discard_snapshot = None
         project = ProjectRepository().get_by_id(pid) if pid else None
         scenario = project.scenario if project else {}
         self._apply_agents_config(scenario.get("agents_config", {}))
         self._apply_seed_events(scenario.get("seed_events", []))
+        self._form_baseline = self._collect_config()
 
     def _apply_agents_config(self, agents_config):
         for cd in self._agent_cards:
@@ -232,6 +242,7 @@ class PersonaPage(QWidget):
         run_ai_task_with_button(
             self,
             self._ai_btn,
+            self._ai_status,
             "AI 生成中…",
             lambda: generate_agent_config(client, scenario),
             lambda result: self._on_ai_config(result, pid),
@@ -257,10 +268,8 @@ class PersonaPage(QWidget):
         """公开保存入口（供工作区导航按钮调用）。"""
         self._save()
 
-    def _save(self):
-        if not self._pid:
-            return
-
+    def _collect_config(self):
+        """收集当前表单的行为体配置与种子事件。"""
         agents_config = {
             str(cd["id"]): {
                 "stance": cd["stance"].value(),
@@ -270,17 +279,29 @@ class PersonaPage(QWidget):
             }
             for cd in self._agent_cards
         }
-
-        seed_events = []
         max_cycle = max(app_config.sim.max_rounds, 1)
+        seed_events = []
         for sr in self._seed_rows:
-            content = sr["content"].text().strip()
-            if not content:
+            # 行的周期上限在创建时确定，收集时按当前设置钳制一次
+            cycle = max(1, min(sr["cycle"].value(), max_cycle))
+            seed_events.append({"content": sr["content"].text().strip(), "cycle": cycle})
+        return agents_config, seed_events
+
+    def has_unsaved_changes(self) -> bool:
+        """本步是否有未保存的修改，供导航与状态指示判断。"""
+        if self._form_baseline is None:
+            return False
+        return self._collect_config() != self._form_baseline
+
+    def _save(self):
+        if not self._pid:
+            return
+
+        agents_config, seed_events = self._collect_config()
+        for sr in seed_events:
+            if not sr["content"]:
                 self.log("请填写所有种子事件的内容", is_error=True)
                 return
-            # 行的周期上限在创建时确定，保存时按当前设置钳制一次
-            cycle = max(1, min(sr["cycle"].value(), max_cycle))
-            seed_events.append({"content": content, "cycle": cycle})
 
         repo = ProjectRepository()
         project = repo.get_by_id(self._pid)
@@ -288,13 +309,43 @@ class PersonaPage(QWidget):
             # 项目已在首页被删除：不静默吞掉，提示用户重新创建
             self.log("项目已被删除，请回到首页重新创建或打开其他项目", is_error=True)
             return
-        # update_scenario 为全量替换，先读旧 scenario 再合并写回
+        # 与本步载入时的表单比对：识别用户真实编辑，不受库中存储格式影响
+        changed = (agents_config, seed_events) != self._form_baseline
         scenario = dict(project.scenario)
         scenario["agents_config"] = agents_config
         scenario["seed_events"] = seed_events
-        # 行为体/种子事件变更使旧仿真结果失效：清轮次/检查点/报告并回到草稿
-        if project.status in ("completed", "interrupted"):
-            invalidate_simulation_results(self._pid)
-        repo.update_scenario(self._pid, scenario)
+        if not changed:
+            # 无改动：不写库，直接继续
+            self._discard_snapshot = None
+        else:
+            if project.status in ("completed", "interrupted"):
+                fingerprint = json.dumps(
+                    {"agents_config": agents_config, "seed_events": seed_events},
+                    sort_keys=True,
+                    ensure_ascii=False,
+                )
+                if fingerprint == self._discard_snapshot:
+                    # 上次取消保存后未再编辑：确认放弃修改，表单恢复后直接继续
+                    self._discard_snapshot = None
+                    self.load_project(self._pid)
+                    self.log("已放弃未保存的修改")
+                    self.agents_saved.emit(self._pid)
+                    return
+                # 行为体/种子事件变更使旧仿真结果失效；清前先确认
+                if not ConfirmDialog.confirm(
+                    self,
+                    "保存并清除仿真结果",
+                    "行为体或种子事件已变更，该项目的全部仿真轮次、断点与报告将被清除，无法恢复。",
+                    ok_text="保存并清除",
+                    danger=True,
+                ):
+                    self._discard_snapshot = fingerprint
+                    self.log("本步修改未保存；再点「下一步」将放弃修改并继续")
+                    return
+                invalidate_simulation_results(self._pid)
+            self._discard_snapshot = None
+            repo.update_scenario(self._pid, scenario)
 
+        self._form_baseline = (agents_config, seed_events)
+        self.log(f"项目已保存（#{self._pid}）")
         self.agents_saved.emit(self._pid)

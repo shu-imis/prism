@@ -46,16 +46,19 @@ def run_ai_task(owner, fn, on_success, on_error):
     return worker
 
 
-def run_ai_task_with_button(owner, btn, busy_text, fn, on_success, on_error):
-    """run_ai_task + 按钮状态管理：执行中禁用并显示 busy 文案，结束后恢复原样。"""
-    idle_text = btn.text()
+def run_ai_task_with_button(owner, btn, status, busy_text, fn, on_success, on_error):
+    """run_ai_task + 进行中状态：按钮让位给状态文字，结束后复原。"""
     btn.setEnabled(False)
-    btn.setText(busy_text)
+    btn.setVisible(False)
+    status.setText(busy_text)
+    status.setVisible(True)
 
     def _wrap(callback):
         def _wrapped(*args):
+            status.setVisible(False)
+            status.setText("")
+            btn.setVisible(True)
             btn.setEnabled(True)
-            btn.setText(idle_text)
             callback(*args)
         return _wrapped
 

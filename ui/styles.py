@@ -9,6 +9,7 @@ BG_PAGE = "#FAFAF7"
 BG_SIDEBAR = "#F5F5F0"
 BG_SURFACE = "#FFFFFF"
 BG_HOVER = "#F0F0EB"
+BG_PRESSED = "#E4E4DF"
 BG_INPUT = "#F5F5F0"
 
 ACCENT = "#C4A265"
@@ -203,6 +204,7 @@ PopupMenu {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; }}
     font-weight: 500;
 }}
 #secondaryBtn:hover {{ background: {BG_HOVER}; border-color: {TEXT_PRIMARY}; }}
+#secondaryBtn:pressed {{ background: {BG_PRESSED}; }}
 #secondaryBtn:disabled {{ color: {TEXT_MUTED}; background: {BG_SURFACE}; border-color: {BORDER}; }}
 
 #ghostBtn {{
@@ -213,6 +215,7 @@ PopupMenu {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; }}
     padding: 4px 10px;
 }}
 #ghostBtn:hover {{ background: {BG_HOVER}; color: {TEXT_PRIMARY}; }}
+#ghostBtn:pressed {{ background: {BG_PRESSED}; }}
 
 #dangerBtn {{
     background: {COLOR_RED};
@@ -303,6 +306,7 @@ def segmented_qss() -> str:
         font-size: 12px;
     }}
     QPushButton:hover {{ background: {BG_HOVER}; color: {TEXT_PRIMARY}; }}
+    QPushButton:pressed {{ background: {BG_PRESSED}; }}
     QPushButton:checked {{
         background: {TEXT_PRIMARY};
         border: 1px solid {TEXT_PRIMARY};
@@ -332,6 +336,7 @@ def dialog_button_qss(color: str = "") -> str:
     qss = (
         f"QPushButton {{ border: none; background: transparent; font-size: 13px; padding: 10px 0; color: {TEXT_SECONDARY}; }}"
         f"QPushButton:hover {{ background: {BG_HOVER}; }}"
+        f"QPushButton:pressed {{ background: {BG_PRESSED}; }}"
     )
     if color:
         qss += f"QPushButton {{ font-weight: 600; color: {color}; }}"
@@ -352,6 +357,8 @@ def stepper_button_qss(inner_edge: str) -> str:
         f"QPushButton{{background:{BG_SURFACE};border:1px solid {BORDER};"
         f"border-{inner_edge}:none;font-size:14px;color:{TEXT_PRIMARY};}}"
         f"QPushButton:hover{{background:{BG_HOVER};}}"
+        f"QPushButton:pressed{{background:{BG_PRESSED};}}"
+        f"QPushButton:disabled{{background:{BG_SURFACE};color:rgba(26,26,26,0.3);}}"
     )
 
 
@@ -557,9 +564,9 @@ def legend_text_qss() -> str:
 # 设置页（ui/settings_page.py）
 # ============================================================
 
-def settings_status_qss(is_error: bool) -> str:
-    """保存/测试结果的反馈文字色。"""
-    return f"color:{COLOR_RED if is_error else COLOR_GREEN};"
+def settings_status_qss(color: str) -> str:
+    """设置页状态行文字色：进行中用普通文字色，成功/失败用语义色。"""
+    return f"color:{color};"
 
 
 # ============================================================

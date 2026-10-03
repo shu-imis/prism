@@ -56,7 +56,7 @@ from ui.styles import (
     table_header_qss,
     verdict_qss,
 )
-from ui.widgets import Caption, Card, ConfirmDialog, GhostBtn, SecondaryBtn, Title, clear_layout
+from ui.widgets import Caption, Card, ConfirmDialog, GhostBtn, SecondaryBtn, StatusLabel, Title, clear_layout
 
 _METRIC_COLUMNS = ("周期", *METRICS.values())
 
@@ -139,6 +139,8 @@ class ResultPage(QWidget):
         ai_header.addStretch()
         self._ai_btn = GhostBtn("生成 AI 分析")
         self._ai_btn.clicked.connect(self._generate_ai_analysis)
+        self._ai_status = StatusLabel()
+        ai_header.addWidget(self._ai_status)
         ai_header.addWidget(self._ai_btn)
         self._ai_card.add_layout(ai_header)
         self._ai_body = QVBoxLayout()
@@ -408,6 +410,7 @@ class ResultPage(QWidget):
         run_ai_task_with_button(
             self,
             self._ai_btn,
+            self._ai_status,
             "AI 分析中…",
             lambda: analyze_evolution(client, report, rounds),
             lambda analysis: self._on_ai_analysis(analysis, pid),
