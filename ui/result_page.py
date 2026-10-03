@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -29,7 +28,34 @@ from report.exporter import ReportExporter
 from report.generator import ReportGenerator, SimulationReport, recommendation_level
 from ui.ai_worker import run_ai_task_with_button
 from ui.charts import MetricsChart, RadarChart, SwimlaneGrid
-from ui.styles import *
+from ui.scroll import SmoothScrollArea
+from ui.styles import (
+    COLOR_ORANGE,
+    COLOR_RED,
+    DARK_BAD,
+    DARK_GOOD,
+    DARK_MUTED,
+    PAD_LG,
+    PAD_MD,
+    PAD_SM,
+    PAD_XL,
+    PAD_XS,
+    TEXT_MUTED,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
+    banner_meta_qss,
+    banner_summary_qss,
+    banner_title_qss,
+    hint_qss,
+    kpi_delta_qss,
+    kpi_name_qss,
+    kpi_value_qss,
+    report_banner_qss,
+    small_text_qss,
+    table_cell_qss,
+    table_header_qss,
+    verdict_qss,
+)
 from ui.widgets import Caption, Card, ConfirmDialog, GhostBtn, SecondaryBtn, Title, clear_layout
 
 _METRIC_COLUMNS = ("周期", *METRICS.values())
@@ -42,12 +68,6 @@ _KPIS = [
     ("服务水平", "final_service_level", "service_delta", "{:.0%}", "{:+.1%}", "up_good"),
     ("利润率", "final_profit_margin", "margin_delta", "{:+.1%}", "{:+.1%}", "up_good"),
 ]
-
-# 深色背景上的语义色（比页面版更亮一档）
-_DARK_GOOD = "#9CC49C"
-_DARK_BAD = "#D98C8C"
-_DARK_MUTED = "#8A8A86"
-_DARK_TEXT = "#F5F5F2"
 
 
 class ResultPage(QWidget):
@@ -64,19 +84,17 @@ class ResultPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll = SmoothScrollArea()
 
         inner = QWidget()
         inner_layout = QVBoxLayout(inner)
-        inner_layout.setContentsMargins(0, 0, PAD_XL, 0)
+        inner_layout.setContentsMargins(PAD_XL, PAD_XL, PAD_XL, PAD_XL)
         inner_layout.setSpacing(PAD_SM)
 
         # --- 1. 深色结论横幅 ---
         banner = QWidget()
         banner.setObjectName("reportBanner")
-        banner.setStyleSheet(f"#reportBanner{{background:{TEXT_PRIMARY};}}")
+        banner.setStyleSheet(report_banner_qss())
         bl = QVBoxLayout(banner)
         bl.setContentsMargins(PAD_LG, PAD_LG, PAD_LG, PAD_LG)
         bl.setSpacing(PAD_MD)
@@ -87,10 +105,10 @@ class ResultPage(QWidget):
         tfont.setPointSize(15)
         tfont.setBold(True)
         banner_title.setFont(tfont)
-        banner_title.setStyleSheet(f"color:{_DARK_TEXT};")
+        banner_title.setStyleSheet(banner_title_qss())
         title_row.addWidget(banner_title)
         self._banner_project = QLabel("")
-        self._banner_project.setStyleSheet(f"font-size:12px;color:{_DARK_MUTED};")
+        self._banner_project.setStyleSheet(banner_meta_qss())
         title_row.addWidget(self._banner_project)
         title_row.addStretch()
         bl.addLayout(title_row)
@@ -106,7 +124,7 @@ class ResultPage(QWidget):
 
         self._banner_summary = QLabel("")
         self._banner_summary.setWordWrap(True)
-        self._banner_summary.setStyleSheet("font-size:12px;color:#AAAAA5;")
+        self._banner_summary.setStyleSheet(banner_summary_qss())
         bl.addWidget(self._banner_summary)
 
         self._kpi_row = QHBoxLayout()
@@ -133,7 +151,7 @@ class ResultPage(QWidget):
         chart_header = QHBoxLayout()
         chart_header.addWidget(Title("指标演化", 14))
         chart_hint = QLabel("各指标按自身取值范围归一化")
-        chart_hint.setStyleSheet(f"font-size:11px;color:{TEXT_MUTED};")
+        chart_hint.setStyleSheet(hint_qss())
         chart_header.addStretch()
         chart_header.addWidget(chart_hint)
         chart_card.add_layout(chart_header)
@@ -166,7 +184,7 @@ class ResultPage(QWidget):
         swim_header = QHBoxLayout()
         swim_header.addWidget(Title("演化过程", 14))
         swim_hint = QLabel("点击色块查看行动详情；红色周期含关键事件")
-        swim_hint.setStyleSheet(f"font-size:11px;color:{TEXT_MUTED};")
+        swim_hint.setStyleSheet(hint_qss())
         swim_header.addStretch()
         swim_header.addWidget(swim_hint)
         swim_card.add_layout(swim_header)
@@ -308,12 +326,12 @@ class ResultPage(QWidget):
 
         rec = report.recommendation
         color = {
-            "ok": _DARK_GOOD,
+            "ok": DARK_GOOD,
             "warn": COLOR_ORANGE,
-            "risk": _DARK_BAD,
+            "risk": DARK_BAD,
         }[recommendation_level(rec)]
         self._verdict.setText(rec)
-        self._verdict.setStyleSheet(f"color:{color};")
+        self._verdict.setStyleSheet(verdict_qss(color))
 
         clear_layout(self._kpi_row)
         for label, final_field, delta_field, fmt, dfmt, direction in _KPIS:
@@ -323,22 +341,16 @@ class ResultPage(QWidget):
             item = QVBoxLayout()
             item.setSpacing(2)
             value_label = QLabel(fmt.format(final_value))
-            value_label.setStyleSheet(
-                "font-family:'JetBrains Mono';font-size:18px;"
-                f"font-weight:700;color:{_DARK_TEXT};"
-            )
+            value_label.setStyleSheet(kpi_value_qss())
             item.addWidget(value_label)
 
             sub = QHBoxLayout()
             sub.setSpacing(PAD_XS)
             name_label = QLabel(label)
-            name_label.setStyleSheet(f"font-size:10px;color:{_DARK_MUTED};")
+            name_label.setStyleSheet(kpi_name_qss())
             sub.addWidget(name_label)
             delta_label = QLabel(_format_delta(delta, dfmt))
-            delta_label.setStyleSheet(
-                "font-family:'JetBrains Mono';font-size:10px;"
-                f"color:{_dark_delta_color(delta, direction)};"
-            )
+            delta_label.setStyleSheet(kpi_delta_qss(_dark_delta_color(delta, direction)))
             sub.addWidget(delta_label)
             sub.addStretch()
             item.addLayout(sub)
@@ -370,7 +382,7 @@ class ResultPage(QWidget):
             self._ai_body.addWidget(Caption("风险归因"))
             risk_label = QLabel(risk_text)
             risk_label.setWordWrap(True)
-            risk_label.setStyleSheet(f"font-size:12px;color:{COLOR_RED};")
+            risk_label.setStyleSheet(small_text_qss(COLOR_RED))
             self._ai_body.addWidget(risk_label)
 
         recommendations = analysis.get("recommendations", [])
@@ -379,7 +391,7 @@ class ResultPage(QWidget):
             for item in recommendations:
                 rec_label = QLabel(f"• {item}")
                 rec_label.setWordWrap(True)
-                rec_label.setStyleSheet(f"font-size:12px;color:{TEXT_SECONDARY};")
+                rec_label.setStyleSheet(small_text_qss(TEXT_SECONDARY))
                 self._ai_body.addWidget(rec_label)
 
     def _generate_ai_analysis(self):
@@ -464,10 +476,7 @@ class ResultPage(QWidget):
             return
         for col, title in enumerate(_METRIC_COLUMNS):
             header = QLabel(title)
-            header.setStyleSheet(
-                f"font-size:11px;color:{TEXT_MUTED};padding:2px 8px;"
-                f"border-bottom:1px solid {BORDER};"
-            )
+            header.setStyleSheet(table_header_qss())
             header.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self._table_grid.addWidget(header, 0, col)
         for row, state in enumerate(self._rounds, start=1):
@@ -482,11 +491,7 @@ class ResultPage(QWidget):
             for col, value in enumerate(values):
                 cell = QLabel(value)
                 cell.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                cell.setStyleSheet(
-                    "font-family:'JetBrains Mono';font-size:12px;"
-                    f"color:{TEXT_PRIMARY};padding:2px 8px;"
-                    f"border-bottom:1px solid {BORDER_LIGHT};"
-                )
+                cell.setStyleSheet(table_cell_qss())
                 self._table_grid.addWidget(cell, row, col)
 
     # --- 导出 ---
@@ -516,6 +521,6 @@ def _format_delta(delta: float, fmt: str) -> str:
 
 def _dark_delta_color(delta: float, direction: str) -> str:
     if abs(delta) < 1e-9 or direction == "neutral":
-        return _DARK_MUTED
+        return DARK_MUTED
     good = (delta > 0) == (direction == "up_good")
-    return _DARK_GOOD if good else _DARK_BAD
+    return DARK_GOOD if good else DARK_BAD

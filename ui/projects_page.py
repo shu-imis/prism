@@ -1,9 +1,24 @@
 """项目页 — 项目列表 / 回收站"""
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QGridLayout, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout, QPushButton,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from ui.styles import *
+from ui.scroll import SmoothScrollArea
+from ui.styles import (
+    COLOR_RED,
+    PAD_LG,
+    PAD_MD,
+    PAD_SM,
+    PAD_XL,
+    PAD_XS,
+    STATUS_COLORS,
+    STATUS_LABELS,
+    TEXT_MUTED,
+    project_card_qss,
+    project_empty_qss,
+    project_name_qss,
+    project_status_qss,
+)
 from ui.widgets import Title, Caption, ConfirmDialog, PrimaryBtn, DangerBtn, PopupMenu, StatusDot, clear_layout
 from db.models import ProjectRepository, is_valid_json
 
@@ -21,11 +36,11 @@ class ProjectsPage(QWidget):
 
     def _build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, PAD_XL, 0, PAD_XL)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(PAD_LG)
 
         hdr = QHBoxLayout()
-        hdr.setContentsMargins(PAD_XL, 0, PAD_XL, 0)
+        hdr.setContentsMargins(PAD_XL, PAD_XL, PAD_XL, 0)
         self._title = Title("项目列表", 18)
         hdr.addWidget(self._title)
         hdr.addStretch()
@@ -43,13 +58,11 @@ class ProjectsPage(QWidget):
         hdr.addWidget(self._clear_btn)
         layout.addLayout(hdr)
 
-        self._scroll = QScrollArea()
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QScrollArea.NoFrame)
+        self._scroll = SmoothScrollArea()
 
         self._inner = QWidget()
         self._grid = QGridLayout(self._inner)
-        self._grid.setContentsMargins(PAD_XL, 0, PAD_XL, 0)
+        self._grid.setContentsMargins(PAD_XL, PAD_SM, PAD_XL, PAD_XL)
         self._grid.setSpacing(PAD_MD)
         self._grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._scroll.setWidget(self._inner)
@@ -99,7 +112,7 @@ class ProjectsPage(QWidget):
             empty_text = "回收站为空" if in_trash else "暂无项目\n点击「＋ 新建项目」创建"
             empty = QLabel(empty_text)
             empty.setAlignment(Qt.AlignCenter)
-            empty.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 14px; padding: 40px;")
+            empty.setStyleSheet(project_empty_qss())
             for col in range(cols):
                 self._grid.setColumnStretch(col, 1)
             self._grid.setRowStretch(0, 1)
@@ -109,10 +122,7 @@ class ProjectsPage(QWidget):
         self._grid.setRowStretch(0, 0)
         for i, proj in enumerate(projects):
             btn = QPushButton()
-            btn.setStyleSheet(
-                f"QPushButton {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; border-radius: {RADIUS}px; }}"
-                + ("" if in_trash else f"QPushButton:hover {{ border-color: {TEXT_PRIMARY}; }}")
-            )
+            btn.setStyleSheet(project_card_qss(clickable=not in_trash))
             btn.setFixedSize(240, 140)
             if not in_trash:
                 btn.setCursor(Qt.PointingHandCursor)
@@ -128,14 +138,14 @@ class ProjectsPage(QWidget):
                 sr = QHBoxLayout()
                 sr.addWidget(StatusDot(STATUS_COLORS.get(proj.status, TEXT_MUTED)))
                 sl = QLabel(STATUS_LABELS.get(proj.status, proj.status))
-                sl.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {STATUS_COLORS.get(proj.status, TEXT_MUTED)};")
+                sl.setStyleSheet(project_status_qss(STATUS_COLORS.get(proj.status, TEXT_MUTED)))
                 sr.addWidget(sl)
                 sr.addStretch()
                 card_layout.addLayout(sr)
 
             name = QLabel(proj.name)
             name.setWordWrap(True)
-            name.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {TEXT_PRIMARY};")
+            name.setStyleSheet(project_name_qss())
             card_layout.addWidget(name)
 
             industry = proj.scenario.get("industry", "")

@@ -6,8 +6,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QEvent, QObject, QPoint, QRectF, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter
 from ui.styles import (
-    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_ON_DARK, ACCENT, BG_INPUT, BG_SURFACE,
-    BG_HOVER, BORDER, COLOR_RED, BTN_H, PAD_LG, PAD_MD, PAD_XL,
+    ACCENT, BORDER, BTN_H, COLOR_RED, PAD_LG, PAD_MD, PAD_XL,
+    TEXT_ON_DARK, TEXT_PRIMARY, TEXT_SECONDARY,
+    dialog_button_qss, popup_item_qss, segmented_qss, status_dot_qss,
+    stepper_button_qss, stepper_input_qss, tip_popup_qss,
 )
 
 
@@ -64,24 +66,6 @@ class SegmentedControl(QWidget):
 
     valueChanged = Signal(str)
 
-    _QSS = f"""
-    QPushButton {{
-        background: {BG_SURFACE};
-        border: 1px solid {BORDER};
-        border-radius: 0px;
-        color: {TEXT_MUTED};
-        padding: 3px 12px;
-        font-size: 12px;
-    }}
-    QPushButton:hover {{ background: {BG_HOVER}; color: {TEXT_PRIMARY}; }}
-    QPushButton:checked {{
-        background: {TEXT_PRIMARY};
-        border: 1px solid {TEXT_PRIMARY};
-        color: {TEXT_ON_DARK};
-        font-weight: 600;
-    }}
-    """
-
     def __init__(self, options: list[tuple[str, str]], parent=None):
         """options: [(value, label), ...]，同一时刻仅一个按钮处于选中态。"""
         super().__init__(parent)
@@ -90,13 +74,14 @@ class SegmentedControl(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
+        qss = segmented_qss()
         self._values: dict[QPushButton, str] = {}
         for value, label in options:
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setFixedHeight(BTN_H - 4)
-            btn.setStyleSheet(self._QSS)
+            btn.setStyleSheet(qss)
             self._group.addButton(btn)
             layout.addWidget(btn)
             self._values[btn] = value
@@ -131,7 +116,6 @@ class Title(QLabel):
         f.setPointSize(size)
         f.setBold(True)
         self.setFont(f)
-        self.setStyleSheet(f"color: {TEXT_PRIMARY};")
 
 
 class Caption(QLabel):
@@ -141,7 +125,6 @@ class Caption(QLabel):
         f = QFont()
         f.setPointSize(11)
         self.setFont(f)
-        self.setStyleSheet(f"color: {TEXT_MUTED};")
 
 
 class Divider(QFrame):
@@ -152,7 +135,6 @@ class Divider(QFrame):
             self.setFixedWidth(1)
         else:
             self.setFixedHeight(1)
-        self.setStyleSheet(f"background: {BORDER}; border: none;")
 
 
 class StatusDot(QLabel):
@@ -162,7 +144,7 @@ class StatusDot(QLabel):
         self.setFixedSize(12, 12)
 
     def set_color(self, color):
-        self.setStyleSheet(f"color: {color}; font-size: 10px;")
+        self.setStyleSheet(status_dot_qss(color))
 
 
 class PopupMenu(QFrame):
@@ -172,23 +154,10 @@ class PopupMenu(QFrame):
     Qt.Popup 语义：点击菜单外区域自动关闭（与系统菜单一致），关闭即销毁。
     """
 
-    _ITEM_QSS = f"""
-    QPushButton {{
-        border: none;
-        background: transparent;
-        padding: 6px 16px;
-        font-size: 12px;
-        color: {TEXT_PRIMARY};
-        text-align: left;
-    }}
-    QPushButton:hover {{ background: {TEXT_PRIMARY}; color: {TEXT_ON_DARK}; }}
-    """
-
     def __init__(self, parent=None):
         super().__init__(parent, Qt.Popup | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(f"PopupMenu {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; }}")
         self._ly = QVBoxLayout(self)
         self._ly.setContentsMargins(4, 4, 4, 4)
         self._ly.setSpacing(0)
@@ -196,7 +165,7 @@ class PopupMenu(QFrame):
     def add_action(self, text: str, callback) -> None:
         btn = QPushButton(text)
         btn.setCursor(Qt.PointingHandCursor)
-        btn.setStyleSheet(self._ITEM_QSS)
+        btn.setStyleSheet(popup_item_qss())
         btn.clicked.connect(lambda checked=False, cb=callback: (self.close(), cb()))
         self._ly.addWidget(btn)
 
@@ -210,11 +179,6 @@ class ConfirmDialog(QDialog):
 
     结构：内容区（标题 + 说明）+ 1px 分隔线 + 通栏按钮条。确认与通知
     两种形态结构一致；danger=True 时确认按钮红字警示。Esc 或点取消均为拒绝。
-    """
-
-    _BTN_QSS = f"""
-    QPushButton {{ border: none; background: transparent; font-size: 13px; padding: 10px 0; color: {TEXT_SECONDARY}; }}
-    QPushButton:hover {{ background: {BG_HOVER}; }}
     """
 
     def __init__(self, parent, title, text, ok_text="确定", cancel_text="取消", danger=False):
@@ -262,16 +226,14 @@ class ConfirmDialog(QDialog):
         if cancel_text:
             cancel_btn = QPushButton(cancel_text)
             cancel_btn.setCursor(Qt.PointingHandCursor)
-            cancel_btn.setStyleSheet(self._BTN_QSS)
+            cancel_btn.setStyleSheet(dialog_button_qss())
             cancel_btn.clicked.connect(self.reject)
             btns.addWidget(cancel_btn, 1)
             btns.addWidget(Divider(vertical=True))
         ok_btn = QPushButton(ok_text)
         ok_btn.setCursor(Qt.PointingHandCursor)
         ok_color = COLOR_RED if danger else TEXT_PRIMARY
-        ok_btn.setStyleSheet(
-            self._BTN_QSS + f"QPushButton {{ font-weight: 600; color: {ok_color}; }}"
-        )
+        ok_btn.setStyleSheet(dialog_button_qss(ok_color))
         ok_btn.clicked.connect(self.accept)
         btns.addWidget(ok_btn, 1)
         ly.addLayout(btns)
@@ -319,10 +281,6 @@ class TipLabel(QLabel):
     宿主销毁时关闭。全应用同时最多一个浮层（类级管理）。
     """
 
-    _TIP_QSS = (
-        f"background: {BG_SURFACE}; color: {TEXT_PRIMARY};"
-        f"border: 1px solid {BORDER}; padding: 4px 8px; font-size: 11px;"
-    )
     _popup = None  # 当前打开的浮层（QLabel）
     _owner = None  # 浮层所属的 TipLabel
     _filter_installed = False  # 全局解散过滤器只安装一次
@@ -364,7 +322,7 @@ class TipLabel(QLabel):
         cls.hide_tip()
         popup = QLabel(owner._tip, None, Qt.ToolTip | Qt.FramelessWindowHint)
         popup.setAttribute(Qt.WA_DeleteOnClose)
-        popup.setStyleSheet(cls._TIP_QSS)
+        popup.setStyleSheet(tip_popup_qss())
         popup.setWordWrap(True)
 
         # 约束在光标所在屏幕的可用区域内：超宽先限宽换行，右/下溢出则回收到屏幕内
@@ -432,30 +390,21 @@ class _StepperInput(QWidget):
         self._minus = QPushButton("−")
         self._minus.setFixedSize(BTN_H, BTN_H)
         self._minus.setCursor(Qt.PointingHandCursor)
-        self._minus.setStyleSheet(
-            f"QPushButton{{background:{BG_SURFACE};border:1px solid {BORDER};border-right:none;font-size:14px;color:{TEXT_PRIMARY};}}"
-            f"QPushButton:hover{{background:{BG_HOVER};}}"
-        )
+        self._minus.setStyleSheet(stepper_button_qss("right"))
         self._minus.clicked.connect(self._decrease)
         layout.addWidget(self._minus)
 
         self._input = QLineEdit(self._format(value))
         self._input.setFixedHeight(BTN_H)
         self._input.setAlignment(Qt.AlignCenter)
-        self._input.setStyleSheet(
-            f"QLineEdit{{background:{BG_INPUT};border:1px solid {BORDER};border-left:none;border-right:none;font-family:'JetBrains Mono';font-size:13px;color:{TEXT_PRIMARY};}}"
-            f"QLineEdit:focus{{border:1px solid {TEXT_PRIMARY};}}"
-        )
+        self._input.setStyleSheet(stepper_input_qss())
         self._input.editingFinished.connect(self._validate_input)
         layout.addWidget(self._input)
 
         self._plus = QPushButton("＋")
         self._plus.setFixedSize(BTN_H, BTN_H)
         self._plus.setCursor(Qt.PointingHandCursor)
-        self._plus.setStyleSheet(
-            f"QPushButton{{background:{BG_SURFACE};border:1px solid {BORDER};border-left:none;font-size:14px;color:{TEXT_PRIMARY};}}"
-            f"QPushButton:hover{{background:{BG_HOVER};}}"
-        )
+        self._plus.setStyleSheet(stepper_button_qss("left"))
         self._plus.clicked.connect(self._increase)
         layout.addWidget(self._plus)
 

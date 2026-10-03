@@ -4,7 +4,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPlainTextEdit,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -13,8 +12,26 @@ from PySide6.QtWidgets import (
 from ui.event_page import EventPage
 from ui.persona_page import PersonaPage
 from ui.result_page import ResultPage
+from ui.scroll import ChainingPlainTextEdit
 from ui.simulation_page import SimulationPage
-from ui.styles import *
+from ui.styles import (
+    BORDER,
+    COLOR_GREEN,
+    HEADER_H,
+    PAD_LG,
+    PAD_MD,
+    PAD_SM,
+    PAD_XL,
+    STATUS_COLORS,
+    STATUS_LABELS,
+    TEXT_MUTED,
+    TEXT_ON_DARK,
+    small_text_qss,
+    terminal_qss,
+    workspace_bar_qss,
+    workspace_step_name_qss,
+    workspace_step_tag_qss,
+)
 from ui.widgets import Divider, PrimaryBtn, SecondaryBtn, StatusDot
 from db.models import (
     CheckpointRepository,
@@ -45,22 +62,17 @@ class ProcessPage(QWidget):
         # --- 顶栏 ---
         bar = QWidget()
         bar.setFixedHeight(HEADER_H)
-        bar.setStyleSheet(f"background:{TEXT_PRIMARY};")
+        bar.setStyleSheet(workspace_bar_qss())
         bl = QHBoxLayout(bar)
         bl.setContentsMargins(PAD_LG, 0, PAD_LG, 0)
 
         self._tag = QLabel("STEP 01")
-        self._tag.setStyleSheet(
-            f"background:{ACCENT};color:{TEXT_ON_DARK};padding:2px 8px;"
-            "font-family:'JetBrains Mono';font-size:10px;font-weight:700;"
-        )
+        self._tag.setStyleSheet(workspace_step_tag_qss())
         bl.addWidget(self._tag)
         bl.addSpacing(PAD_SM)
 
         self._nm = QLabel("供应链搭建")
-        self._nm.setStyleSheet(
-            f"font-size:13px;font-weight:700;color:{TEXT_ON_DARK};"
-        )
+        self._nm.setStyleSheet(workspace_step_name_qss())
         bl.addWidget(self._nm)
         bl.addStretch()
 
@@ -69,14 +81,14 @@ class ProcessPage(QWidget):
         bl.addSpacing(PAD_SM)
 
         self._st = QLabel("就绪")
-        self._st.setStyleSheet(f"font-size:12px;color:{TEXT_ON_DARK};")
+        self._st.setStyleSheet(small_text_qss(TEXT_ON_DARK))
         bl.addWidget(self._st)
 
         layout.addWidget(bar)
 
         # --- 主体 ---
         body = QVBoxLayout()
-        body.setContentsMargins(PAD_XL, PAD_XL, 0, 0)
+        body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
         self._stack = QStackedWidget()
@@ -91,7 +103,6 @@ class ProcessPage(QWidget):
         layout.addLayout(body, 1)
 
         # --- 导航 ---
-        layout.addSpacing(PAD_XL)
         layout.addWidget(Divider())
 
         nav = QHBoxLayout()
@@ -110,20 +121,14 @@ class ProcessPage(QWidget):
         layout.addLayout(nav)
 
         # --- 日志终端 ---
-        self._log = QPlainTextEdit()
+        self._log = ChainingPlainTextEdit()
         self._log.setObjectName("terminalLog")
         self._log.setReadOnly(True)
         self._log.setFixedHeight(120)
         self._log.setFrameShape(QFrame.NoFrame)
-        self._log.setStyleSheet(
-            "QPlainTextEdit{"
-            f"background:{BG_TERMINAL};color:#AAA;"
-            "font-family:'JetBrains Mono','Noto Sans SC';font-size:11px;"
-            "border:none;padding:0px;"
-            "}"
-        )
-        # 滚动条贴控件右边框（padding=0），文本间距由 viewport margins 控制
-        self._log.setViewportMargins(10, 6, 10, 6)
+        self._log.setStyleSheet(terminal_qss())
+        # 文本左起对齐内容列 PAD_XL：视口边距 20 + 文档隐式边距 4；滚动条贴控件右边框
+        self._log.setViewportMargins(PAD_XL - 4, 6, PAD_XL - 4, 6)
         layout.addWidget(self._log)
 
         self._log_msg("工作区已就绪")
@@ -142,7 +147,7 @@ class ProcessPage(QWidget):
 
     def _log_msg(self, msg, is_error=False):
         prefix = "×" if is_error else ">"
-        self._log.appendPlainText(f"  {prefix}  {msg}")
+        self._log.appendPlainText(f"{prefix}  {msg}")
 
     def _on_saved(self, pid):
         self._pid = pid
@@ -222,23 +227,23 @@ class ProcessPage(QWidget):
         if self._step == 2:
             if self._is_sim_done():
                 self._next.setText("下一步 →")
-            elif self._smp.is_running():
-                self._next.setText("⏸ 暂停")
-            elif self._smp.is_paused():
-                self._next.setText("▶ 继续")
+                self._next.setEnabled(True)
             else:
-                self._next.setText("▶ 启动仿真")
+                # 主动作状态（启动/暂停/继续/恢复/重试）由仿真页统一维护
+                self._next.setText(self._smp._action_label)
+                self._next.setEnabled(self._smp._action_enabled)
             self._next.setVisible(True)
         elif self._step == 3:
             self._next.setVisible(False)
         else:
             self._next.setText("下一步 →")
+            self._next.setEnabled(True)
             self._next.setVisible(True)
 
         # 右上角步骤状态指示（圆点与文案同色）
         status_text, status_color = self._step_status()
         self._st.setText(status_text)
-        self._st.setStyleSheet(f"font-size:12px;color:{status_color};")
+        self._st.setStyleSheet(small_text_qss(status_color))
         self._dot.set_color(status_color)
 
     def _step_status(self) -> tuple[str, str]:

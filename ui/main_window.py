@@ -1,11 +1,10 @@
 """Prism 主窗口"""
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QPushButton, QLabel,
-    QStackedWidget, QHBoxLayout, QButtonGroup, QGraphicsDropShadowEffect,
+    QStackedWidget, QHBoxLayout, QButtonGroup,
 )
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor
-from ui.styles import stylesheet, SIDEBAR_W, TEXT_INACTIVE, BG_INACTIVE_CHECKED, TEXT_MUTED
+from PySide6.QtCore import Qt
+from ui.styles import SIDEBAR_W, sidebar_inactive_qss, stylesheet
 from ui.projects_page import ProjectsPage
 from ui.process_page import ProcessPage
 from ui.settings_page import SettingsPage
@@ -19,7 +18,8 @@ _orphaned_ai_workers: list = []
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setMinimumSize(960, 600)
+        # 最小尺寸按内容页实测最小宽度（Step1 节点行 1017）取整上抬，横向滚动仅作兜底
+        self.setMinimumSize(1040, 640)
         self.resize(1100, 700)
         self.setWindowTitle("Prism")
         self.setStyleSheet(stylesheet())
@@ -32,33 +32,18 @@ class MainWindow(QMainWindow):
             active = self.isActiveWindow()
             self._title_bar.set_active(active)
             # 失焦时侧栏随标题栏一起收敛（选中态减淡、文字变灰）
-            self._sidebar.setStyleSheet("" if active else (
-                f"#sidebar QPushButton{{color:{TEXT_INACTIVE};}}"
-                f"#sidebar QPushButton:checked{{background:{BG_INACTIVE_CHECKED};color:{TEXT_MUTED};}}"
-                f"#sidebar QLabel#brand{{color:{TEXT_MUTED};}}"
-            ))
-            # 原生窗口失焦时阴影收敛，自绘阴影对齐这一行为
-            self._shadow.setBlurRadius(24 if active else 12)
-            self._shadow.setOffset(0, 4 if active else 2)
-            self._shadow.setColor(QColor(0, 0, 0, 60 if active else 28))
+            self._sidebar.setStyleSheet("" if active else sidebar_inactive_qss())
         super().changeEvent(event)
 
     def _setup_window(self):
-        # 无边框窗口 + 透明背景，投影由容器自身绘制
+        # 无边框窗口；投影由系统合成器绘制
         self.setWindowFlag(Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
 
     def _build(self):
-        # --- 投影包裹层：10px 透明边距供阴影伸展 ---
-        shadow = QWidget(self)
-        self.setCentralWidget(shadow)
-        shadow_layout = QVBoxLayout(shadow)
-        shadow_layout.setContentsMargins(10, 10, 10, 10)
-        shadow_layout.setSpacing(0)
-
         # --- 整体容器 ---
         container = QWidget()
         container.setObjectName("windowBody")
+        self.setCentralWidget(container)
         main_layout = QVBoxLayout(container)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -119,31 +104,14 @@ class MainWindow(QMainWindow):
         body.addWidget(sidebar)
         body.addWidget(self._stack, 1)
         main_layout.addLayout(body, 1)
-        shadow_layout.addWidget(container)
-
-        # --- 投影效果（弥散投影，与弹出菜单同层次；失焦时收敛，见 changeEvent） ---
-        self._shadow = QGraphicsDropShadowEffect(container)
-        self._shadow.setBlurRadius(24)
-        self._shadow.setOffset(0, 4)
-        self._shadow.setColor(QColor(0, 0, 0, 60))
-        container.setGraphicsEffect(self._shadow)
 
         self._go(0)
 
     def _toggle_maximize(self):
-        # 投影在动画期间逐帧重算高斯模糊会导致卡顿，切换时临时挂起
-        self._shadow.setEnabled(False)
         if self.isMaximized():
             self.showNormal()
         else:
             self.showMaximized()
-        QTimer.singleShot(250, self._restore_shadow)
-
-    def _restore_shadow(self):
-        try:
-            self._shadow.setEnabled(True)
-        except RuntimeError:
-            pass  # 窗口已在动画期间关闭，effect 随容器销毁
 
     # 侧栏索引 → (stack 页面索引, ProjectsPage 模式)：项目列表与回收站共用项目页
     _PAGE_MAP = [(0, "active"), (1, None), (0, "trash"), (2, None)]

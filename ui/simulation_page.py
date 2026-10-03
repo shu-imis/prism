@@ -7,9 +7,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QScrollArea,
     QSizePolicy,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -31,12 +29,18 @@ from db.models import (
 from llm.analysis import analyze_evolution
 from llm.config import active_vendor_label, build_llm_client, get_active_vendor_settings
 from report.generator import ReportGenerator
-from ui.styles import *
+from ui.scroll import ChainingTextEdit
+from ui.styles import (
+    PAD_SM,
+    PAD_XL,
+    TEXT_PRIMARY,
+    mono_value_qss,
+    simulation_log_qss,
+)
 from ui.widgets import (
     Caption,
     Card,
     GhostBtn,
-    PrimaryBtn,
     ProgressBar,
     SecondaryBtn,
     Title,
@@ -226,22 +230,18 @@ class SimulationPage(QWidget):
         self._running = False
         self._worker = None
         self._signals_cleaned = False
-        # 外部日志出口（工作区终端），由 ProcessPage 注入；页面自身日志始终保留
+        # 外部日志出口（工作区终端），由 ProcessPage 注入
         self._log_sink = None
+        # 主动作状态（文案/可用性），由工作区底部导航行读取展示
+        self._action_label = "▶ 启动仿真"
+        self._action_enabled = True
         self._build()
 
     def _build(self):
+        # 仪表盘布局：状态区固定，日志独占剩余空间（本页无整页滚动）
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-
-        inner = QWidget()
-        il = QVBoxLayout(inner)
-        il.setContentsMargins(0, 0, PAD_XL, 0)
-        il.setSpacing(PAD_SM)
+        layout.setContentsMargins(PAD_XL, PAD_XL, PAD_XL, PAD_XL)
+        layout.setSpacing(PAD_SM)
 
         # --- 当前 AI 配置（在「设置」页统一管理） ---
         cfg = Card()
@@ -254,7 +254,7 @@ class SimulationPage(QWidget):
         cfg.add_layout(cfg_header)
         self._llm_caption = Caption("")
         cfg.add(self._llm_caption)
-        il.addWidget(cfg)
+        layout.addWidget(cfg)
 
         # --- 指标卡 ---
         mr = QHBoxLayout()
@@ -264,46 +264,33 @@ class SimulationPage(QWidget):
             c = Card(padding=PAD_SM)
             c.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             v = QLabel("—")
-            v.setStyleSheet(
-                "font-family:'JetBrains Mono';font-size:16px;"
-                f"font-weight:700;color:{TEXT_PRIMARY};"
-            )
+            v.setStyleSheet(mono_value_qss(16, TEXT_PRIMARY, bold=True))
             c.add(v)
             c.add(Caption(lb))
             self._mv[lb] = v
             mr.addWidget(c)
-        il.addLayout(mr)
+        layout.addLayout(mr)
 
         self._bar = ProgressBar()
-        il.addWidget(self._bar)
+        rst = SecondaryBtn("↺ 重置")
+        rst.clicked.connect(self._on_reset)
+        bar_row = QHBoxLayout()
+        bar_row.setSpacing(PAD_SM)
+        bar_row.addWidget(self._bar, 1)
+        bar_row.addWidget(rst)
+        layout.addLayout(bar_row)
 
         self._st = Caption("")
         self._st.setVisible(False)
-        il.addWidget(self._st)
+        layout.addWidget(self._st)
 
-        self._log = QTextEdit()
+        self._log = ChainingTextEdit()
         self._log.setReadOnly(True)
         self._log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._log.setStyleSheet(
-            f"QTextEdit{{background:{BG_INPUT};border:1px solid {BORDER};font-size:12px;"
-            f"padding:0px;}}"
-        )
+        self._log.setStyleSheet(simulation_log_qss())
         # 滚动条贴控件右边框（padding=0），文本左右间距由 viewport margins 对称控制
         self._log.setViewportMargins(8, 5, 8, 5)
-        il.addWidget(self._log, 1)
-
-        br = QHBoxLayout()
-        self._start = PrimaryBtn("▶ 启动仿真")
-        self._start.clicked.connect(self._toggle)
-        br.addWidget(self._start)
-        rst = SecondaryBtn("↺ 重置")
-        rst.clicked.connect(self._on_reset)
-        br.addWidget(rst)
-        br.addStretch()
-        il.addLayout(br)
-
-        scroll.setWidget(inner)
-        layout.addWidget(scroll)
+        layout.addWidget(self._log, 1)
 
         self._refresh_llm_caption()
 
@@ -325,15 +312,22 @@ class SimulationPage(QWidget):
         """注入外部日志出口（工作区终端）。"""
         self._log_sink = sink
 
+    def _set_action(self, label: str, enabled: bool = True):
+        """更新主动作状态（工作区导航行读取展示）并广播状态变化。"""
+        self._action_label = label
+        self._action_enabled = enabled
+        self.state_changed.emit()
+
     def log(self, text: str, is_error: bool = False):
-        """向日志区追加一行（内容经 HTML 转义），错误红色显示，并转发外部出口。"""
+        """操作消息由工作区终端统一聚合（页面日志区只承载仿真内容）；无外部出口时退回页面日志区。"""
+        if self._log_sink is not None:
+            self._log_sink(text, is_error)
+            return
         escaped = html.escape(text)
         if is_error:
             self._log.append(f"<span style='color:#CC3333'>{escaped}</span>")
         else:
             self._log.append(escaped)
-        if self._log_sink is not None:
-            self._log_sink(text, is_error)
 
     def load_project(self, pid):
         # 切换项目：取消旧仿真并断开其信号（不阻塞等待，引擎存检查点后自行退出）
@@ -416,8 +410,7 @@ class SimulationPage(QWidget):
             )
             self._st.setText("仿真中断，可从断点恢复")
             self._st.setVisible(True)
-            self._start.setText("↺ 恢复仿真")
-            self._start.setEnabled(True)
+            self._set_action("↺ 恢复仿真")
             self._running = False
             return
 
@@ -428,13 +421,11 @@ class SimulationPage(QWidget):
             self._bar.setValue(100)
             self._st.setText("仿真已完成")
             self._st.setVisible(True)
-            self._start.setText("✓ 已完成")
-            self._start.setEnabled(False)
+            self._set_action("✓ 已完成", False)
         else:
             self._st.setText("上次仿真未完成，可重新启动")
             self._st.setVisible(True)
-            self._start.setText("▶ 启动仿真")
-            self._start.setEnabled(True)
+            self._set_action("▶ 启动仿真")
         self._running = False
 
     def _append_history_speeches(self, state: dict) -> None:
@@ -469,16 +460,14 @@ class SimulationPage(QWidget):
             if self._worker:
                 self._worker.pause()
             self._running = False
-            self._start.setText("▶ 继续")
-            self.state_changed.emit()
+            self._set_action("▶ 继续")
             return
 
         # 暂停中的 worker 直接恢复，不重建线程、不作废进行中的轮次
         if self._worker is not None and self._worker.is_paused() and self._worker.isRunning():
             self._worker.resume()
             self._running = True
-            self._start.setText("⏸ 暂停")
-            self.state_changed.emit()
+            self._set_action("⏸ 暂停")
             return
 
         # 替换旧 worker 前必须等其线程真正结束，否则对运行中的 QThread
@@ -517,7 +506,7 @@ class SimulationPage(QWidget):
         self._worker.finished.connect(self._on_worker_finished)
 
         self._running = True
-        self._start.setText("⏸ 暂停")
+        self._set_action("⏸ 暂停")
         if self._pid:
             # 项目状态机：启动仿真 → running，完成 → completed（见 process_page）
             project = ProjectRepository().get_by_id(self._pid)
@@ -526,7 +515,6 @@ class SimulationPage(QWidget):
                     self._pid, dict(project.scenario), status="running"
                 )
         self._worker.start()
-        self.state_changed.emit()
 
     def _dispose_worker(self):
         """同步等待旧 worker 线程结束后安全清理。调用方在主线程。
@@ -578,36 +566,30 @@ class SimulationPage(QWidget):
     def _on_succeeded(self, pid, report, results):
         self._running = False
         self._bar.setValue(100)
-        self._start.setText("✓ 完成")
-        self._start.setEnabled(False)
+        self._set_action("✓ 已完成", False)
         self.simulation_completed.emit(pid, report, results)
-        self.state_changed.emit()
 
     def _on_failed(self, msg):
         self._running = False
         self.log(msg, is_error=True)
-        self._start.setText("▶ 重试")
-        self._start.setEnabled(True)
         if self._pid:
             project = ProjectRepository().get_by_id(self._pid)
             if project and project.status == "running":
                 ProjectRepository().update_scenario(
                     self._pid, dict(project.scenario), status="draft"
                 )
-        self.state_changed.emit()
+        self._set_action("▶ 重试")
 
     def _on_recoverable(self, msg):
         self._running = False
         self.log(msg, is_error=True)
-        self._start.setText("↺ 恢复")
-        self._start.setEnabled(True)
         if self._pid:
             project = ProjectRepository().get_by_id(self._pid)
             if project:
                 ProjectRepository().update_scenario(
                     self._pid, dict(project.scenario), status="interrupted"
                 )
-        self.state_changed.emit()
+        self._set_action("↺ 恢复仿真")
 
     def _on_progress(self, current, total, message):
         if total:
@@ -657,15 +639,6 @@ class SimulationPage(QWidget):
         """仿真是否正在运行（供工作区状态指示查询）。"""
         return self._running
 
-    def is_paused(self) -> bool:
-        """是否有暂停中、可恢复的仿真线程（供工作区按钮文案联动）。"""
-        return (
-            not self._running
-            and self._worker is not None
-            and self._worker.is_paused()
-            and self._worker.isRunning()
-        )
-
     def toggle(self):
         """公开切换入口（供工作区导航按钮调用）。"""
         self._toggle()
@@ -698,7 +671,6 @@ class SimulationPage(QWidget):
                     self._pid, dict(project.scenario), status="draft"
                 )
         self._reset()
-        self.state_changed.emit()
 
     def _reset(self):
         self._running = False
@@ -706,7 +678,6 @@ class SimulationPage(QWidget):
         self._st.setText("")
         self._st.setVisible(False)
         self._log.clear()
-        self._start.setText("▶ 启动仿真")
-        self._start.setEnabled(True)
+        self._set_action("▶ 启动仿真")
         for v in self._mv.values():
             v.setText("—")
