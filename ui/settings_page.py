@@ -286,3 +286,7 @@ class SettingsPage(QWidget):
         self._testing = False
         self._test_btn.setVisible(True)
         self._set_status(msg, COLOR_RED if is_error else COLOR_GREEN)
+
+    def iter_ai_workers(self) -> list:
+        """本页运行中的 AI worker 列表（供主窗口关窗前统一兜底）。"""
+        return list(getattr(self, "_ai_workers", None) or [])

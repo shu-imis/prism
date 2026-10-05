@@ -14,8 +14,8 @@ from db.models import (
     CheckpointRepository,
     KnowledgeRepository,
     from_json,
+    from_json_object,
     invalidate_simulation_results,
-    is_valid_json,
 )
 
 
@@ -400,29 +400,31 @@ class JsonHelpersTests(unittest.TestCase):
         self.assertEqual(from_json(None, []), [])
         self.assertEqual(from_json('{"k": 2}', {}), {"k": 2})
 
-    def test_is_valid_json_detects_corruption(self) -> None:
-        """is_valid_json 区分正常、空值与损坏文本，供 UI 标记数据异常。"""
-        self.assertTrue(is_valid_json('{"k": 1}'))
-        self.assertTrue(is_valid_json(""))
-        self.assertTrue(is_valid_json(None))
-        self.assertFalse(is_valid_json("{bad json"))
+    def test_from_json_object_requires_object(self) -> None:
+        """JSON 对象读取只在解析结果为对象时返回内容，否则降级为空对象。"""
+        self.assertEqual(from_json_object('{"k": 2}'), {"k": 2})
+        self.assertEqual(from_json_object(""), {})
+        self.assertEqual(from_json_object(None), {})
+        self.assertEqual(from_json_object("[]"), {})
+        self.assertEqual(from_json_object("{bad json"), {})
 
     def test_corrupt_scenario_json_detectable_on_project(self) -> None:
-        """数据库中损坏的 scenario_json：scenario 降级为空 dict，且可被检测。"""
+        """scenario_json 损坏或非对象：scenario 降级为空 dict 且标记为非完好。"""
         with tempfile.TemporaryDirectory() as tmp:
             db = Database(Path(tmp) / "prism.db")
             db.migrate()
             repo = ProjectRepository(db)
             project = repo.create("Demo", {"industry": "electronics"})
-            with db.transaction() as conn:
-                conn.execute(
-                    "UPDATE projects SET scenario_json = ? WHERE id = ?",
-                    ("{corrupted", project.id),
-                )
 
-            broken = repo.get_by_id(project.id)
-            self.assertEqual(broken.scenario, {})
-            self.assertFalse(is_valid_json(broken.scenario_json))
+            for bad in ("{corrupted", "[]"):
+                with db.transaction() as conn:
+                    conn.execute(
+                        "UPDATE projects SET scenario_json = ? WHERE id = ?",
+                        (bad, project.id),
+                    )
+                broken = repo.get_by_id(project.id)
+                self.assertEqual(broken.scenario, {})
+                self.assertFalse(broken.scenario_intact)
             db.close()
 
 

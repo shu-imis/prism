@@ -20,7 +20,7 @@ from ui.styles import (
     project_status_qss,
 )
 from ui.widgets import Title, Caption, ConfirmDialog, PrimaryBtn, DangerBtn, PopupMenu, StatusDot, clear_layout
-from db.models import ProjectRepository, is_valid_json
+from services.workspace import WorkspaceService
 
 
 class ProjectsPage(QWidget):
@@ -30,7 +30,7 @@ class ProjectsPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._repo = ProjectRepository()
+        self._ws = WorkspaceService()
         self._mode = "active"
         self._build()
 
@@ -96,7 +96,7 @@ class ProjectsPage(QWidget):
         clear_layout(self._grid)  # 网格内只有卡片控件，直接复用通用清理
 
         in_trash = self._mode == "trash"
-        projects = self._repo.list_deleted() if in_trash else self._repo.list_all()
+        projects = self._ws.list_deleted() if in_trash else self._ws.list_active()
         if in_trash:
             has_items = bool(projects)
             self._restore_btn.setEnabled(has_items)
@@ -152,7 +152,7 @@ class ProjectsPage(QWidget):
             if industry:
                 card_layout.addWidget(Caption(industry))
 
-            if not is_valid_json(proj.scenario_json):
+            if not proj.scenario_intact:
                 warn = Caption("数据异常：场景信息已损坏")
                 warn.setStyleSheet(f"color: {COLOR_RED};")
                 card_layout.addWidget(warn)
@@ -196,11 +196,11 @@ class ProjectsPage(QWidget):
         menu.popup(btn.mapToGlobal(pos))
 
     def _restore(self, pid):
-        self._repo.restore(pid)
+        self._ws.restore(pid)
         self.refresh()
 
     def _restore_all(self):
-        self._repo.restore_all()
+        self._ws.restore_all()
         self.refresh()
 
     def _confirm_hard_delete(self, pid, name):
@@ -211,12 +211,12 @@ class ProjectsPage(QWidget):
             ok_text="彻底删除",
             danger=True,
         ):
-            self._repo.hard_delete(pid)
+            self._ws.hard_delete(pid)
             self.project_deleted.emit(pid)
             self.refresh()
 
     def _confirm_empty_trash(self):
-        count = len(self._repo.list_deleted())
+        count = len(self._ws.list_deleted())
         if not count:
             return
         if ConfirmDialog.confirm(
@@ -226,8 +226,8 @@ class ProjectsPage(QWidget):
             ok_text="清空回收站",
             danger=True,
         ):
-            pids = [p.id for p in self._repo.list_deleted()]
-            self._repo.empty_trash()
+            pids = [p.id for p in self._ws.list_deleted()]
+            self._ws.empty_trash()
             for pid in pids:
                 self.project_deleted.emit(pid)
             self.refresh()
@@ -240,6 +240,6 @@ class ProjectsPage(QWidget):
             ok_text="删除",
             danger=True,
         ):
-            self._repo.soft_delete(pid)
+            self._ws.soft_delete(pid)
             self.project_deleted.emit(pid)
             self.refresh()
