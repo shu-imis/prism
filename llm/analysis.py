@@ -21,6 +21,8 @@ from core.scenario_parser import (
     DEFAULT_BASELINE_COST,
     DEFAULT_BASELINE_SERVICE_LEVEL,
     DEFAULT_INITIAL_INVENTORY,
+    NODE_DEFAULTS,
+    build_node,
 )
 from core.world_state import WorldState
 from llm.client import LLMClient
@@ -158,16 +160,16 @@ def _validate_scenario(data: dict[str, Any]) -> dict[str, Any]:
         if not name:
             continue
         node_type = raw.get("type")
-        nodes.append({
-            "name": name[:40],
-            "type": node_type if node_type in VALID_NODE_TYPES else "supplier",
-            "inventory": clamp_int(raw.get("inventory"), 0, 100, 50),
-            "lead_time": clamp_int(raw.get("lead_time"), 0, 10, 2),
-            "capacity": clamp_int(raw.get("capacity"), 1, 200, 100),
-            "cost_index": clamp_int(raw.get("cost_index"), 0, 100, 50),
-            "upstream": _str_list(raw.get("upstream")),
-            "downstream": _str_list(raw.get("downstream")),
-        })
+        nodes.append(build_node(
+            name=name[:40],
+            type=node_type if node_type in VALID_NODE_TYPES else NODE_DEFAULTS["type"],
+            inventory=clamp_int(raw.get("inventory"), 0, 100, NODE_DEFAULTS["inventory"]),
+            lead_time=clamp_int(raw.get("lead_time"), 0, 10, NODE_DEFAULTS["lead_time"]),
+            capacity=clamp_int(raw.get("capacity"), 0, 200, NODE_DEFAULTS["capacity"]),
+            cost_index=clamp_int(raw.get("cost_index"), 0, 100, NODE_DEFAULTS["cost_index"]),
+            upstream=_str_list(raw.get("upstream")),
+            downstream=_str_list(raw.get("downstream")),
+        ))
 
     if not nodes:
         raise ValueError("未能从文档识别供应链节点")

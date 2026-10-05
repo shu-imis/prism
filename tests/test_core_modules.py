@@ -11,7 +11,7 @@ from core.agent import Agent
 from core.agent_factory import AgentFactory
 from core.document_importer import chunk_text, import_documents
 from core.events import EventDetector
-from core.scenario_parser import Scenario, ScenarioParser
+from core.scenario_parser import Scenario, ScenarioParser, build_node, format_refs, parse_refs
 from core.simulation_engine import SimulationEngine
 from core.text_utils import normalize_speech
 from core.world_state import KeyEvent, WorldState
@@ -165,6 +165,24 @@ class CoreModuleTests(unittest.TestCase):
         self.assertEqual(scenario.initial_inventory, 100.0)
         self.assertEqual(scenario.baseline_cost, 0.0)
         self.assertEqual(scenario.baseline_service_level, 1.0)
+
+    def test_build_node_fills_defaults(self) -> None:
+        """build_node：缺省字段取 NODE_DEFAULTS。"""
+        node = build_node()
+        self.assertEqual(node["type"], "supplier")
+        self.assertEqual(node["inventory"], 50)
+        self.assertEqual(node["lead_time"], 2)
+        self.assertEqual(node["capacity"], 100)
+        self.assertEqual(node["cost_index"], 50)
+        self.assertEqual(node["upstream"], [])
+        self.assertEqual(node["downstream"], [])
+
+    def test_node_refs_round_trip(self) -> None:
+        """节点引用列表与输入框文本互转。"""
+        self.assertEqual(format_refs(["节点 1", " 节点 2 "]), "节点 1, 节点 2")
+        self.assertEqual(format_refs("节点 1"), "节点 1")
+        self.assertEqual(format_refs(None), "")
+        self.assertEqual(parse_refs("节点 1, 节点 2,"), ["节点 1", "节点 2"])
 
     def test_action_feed_visibility_rules(self) -> None:
         """验证行动信息流的邻居可见性、高影响力广播与自身排除。"""
