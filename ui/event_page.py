@@ -27,8 +27,7 @@ from core.scenario_parser import (
     format_refs,
     parse_refs,
 )
-from llm.analysis import extract_scenario_from_docs
-from llm.config import build_llm_client
+from services.ai import CLIENT_UNAVAILABLE_MESSAGE, extract_scenario, prepare_client
 from services.workspace import WorkspaceService
 from ui.ai_worker import run_ai_task_with_button
 from ui.save_flow import SaveFlow
@@ -467,9 +466,9 @@ class EventPage(QWidget):
         if not docs_text:
             self.log("请先导入文档或填写供应链背景", is_error=True)
             return
-        client = build_llm_client()
+        client = prepare_client()
         if client is None:
-            self.log("未找到可用的 LLM 配置，请到左侧「设置」页填写 API Key", is_error=True)
+            self.log(CLIENT_UNAVAILABLE_MESSAGE, is_error=True)
             return
         pid = self._pid
         run_ai_task_with_button(
@@ -477,7 +476,7 @@ class EventPage(QWidget):
             self._ai_btn,
             self._ai_status,
             "AI 分析中…",
-            lambda: extract_scenario_from_docs(client, docs_text),
+            lambda: extract_scenario(client, docs_text),
             lambda sc: self._on_ai_scenario(sc, pid),
             self._on_ai_error,
         )
