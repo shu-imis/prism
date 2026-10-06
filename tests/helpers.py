@@ -1,10 +1,11 @@
-"""测试共享助手：fake LLM transport、行为体工厂、内存 keyring。"""
+"""测试共享助手：fake LLM transport、行为体工厂、引擎配置与内存 keyring。"""
 from __future__ import annotations
 
 import time
 
 from core.agent_factory import AgentFactory
 from llm.client import LLMClient, LLMVendor, VendorSettings
+from llm.prompts import AGENT_RESPONSE_SYSTEM
 
 
 def make_fake_llm_client(slow_supplier_seconds: float = 0.0) -> LLMClient:
@@ -71,6 +72,12 @@ def make_always_active_agents():
         agent.activity = 1.0
         agent.active_cycles = list(range(1, 13))
     return agents
+
+
+def configure_engine(engine, agents, scenario, **kwargs) -> None:
+    """引擎 configure 的测试封装：统一注入系统提示词。"""
+    kwargs.setdefault("system_prompt", AGENT_RESPONSE_SYSTEM)
+    engine.configure(agents, scenario, **kwargs)
 
 
 def make_json_client(payload: str) -> LLMClient:

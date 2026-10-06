@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from db.models import ProjectRepository
 from services.reports import ReportService
+from services.simulation import SimulationService
 from services.workspace import WorkspaceService
 from ui.event_page import EventPage
 from ui.persona_page import PersonaPage
@@ -48,6 +48,7 @@ class ProcessPage(QWidget):
         self._saved_steps: set[int] = set()
         self._ws = WorkspaceService()
         self._rs = ReportService()
+        self._ss = SimulationService()
         self._build()
         self._wire()
 
@@ -160,12 +161,7 @@ class ProcessPage(QWidget):
         self._rp.set_report(r, res, project_id=self._pid)
         # 持久化报告（主线程）；仿真轮次已由引擎自行落库
         try:
-            repo = ProjectRepository()
-            project = repo.get_by_id(self._pid)
-            if project:
-                repo.update_scenario(
-                    self._pid, dict(project.scenario), status="completed"
-                )
+            self._ss.finish_success(self._pid)
             self._rs.persist(self._pid, r, res)
         except Exception as e:
             self._log_msg(f"数据保存失败：{e}")

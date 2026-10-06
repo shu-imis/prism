@@ -303,7 +303,8 @@ prism/
 │   └── models.py                 # 数据模型 + Repository
 ├── services/
 │   ├── workspace.py              # 工作区服务：项目装载、保存与知识库
-│   └── reports.py                # 报告服务：结果装载与持久化
+│   ├── reports.py                # 报告服务：结果装载与持久化
+│   └── simulation.py             # 仿真服务：运行准备与状态收尾
 ├── tests/
 │   ├── helpers.py                # 共享测试助手
 │   ├── qt_helpers.py             # Qt 离屏测试基建（临时数据库 + 窗口回收）
@@ -317,6 +318,7 @@ prism/
 │   ├── test_workspace_pages.py   # 工作区子页面行为测试
 │   ├── test_save_flow.py         # 保存流程状态机测试
 │   ├── test_workspace_service.py # 工作区服务测试
+│   ├── test_simulation_service.py# 仿真服务测试
 │   └── test_scroll.py            # 滚动交互测试
 └── docs/
     ├── prism.md                  # 本文档
