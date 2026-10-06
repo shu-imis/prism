@@ -272,6 +272,7 @@ prism/
 │   ├── persona_page.py           # 行为体性格配置（Step 02）
 │   ├── simulation_page.py        # 仿真运行（Step 03）
 │   ├── result_page.py            # 演化分析（Step 04）
+│   ├── save_flow.py              # 步骤保存流程（变更判定与失效确认）
 │   ├── ai_worker.py              # 通用 AI 调用工作线程
 │   ├── charts.py                 # 折线图 / 雷达图 / 泳道图组件
 │   ├── scroll.py                 # 平滑滚动区与滚轮链式文本控件
@@ -300,6 +301,9 @@ prism/
 ├── db/
 │   ├── database.py               # SQLite 连接 + 迁移
 │   └── models.py                 # 数据模型 + Repository
+├── services/
+│   ├── workspace.py              # 工作区服务：项目装载、保存与知识库
+│   └── reports.py                # 报告服务：结果装载与持久化
 ├── tests/
 │   ├── helpers.py                # 共享测试助手
 │   ├── qt_helpers.py             # Qt 离屏测试基建（临时数据库 + 窗口回收）
@@ -308,8 +312,11 @@ prism/
 │   ├── test_core_modules.py      # 核心模块测试
 │   ├── test_repositories.py      # 数据库 Repository 测试
 │   ├── test_reporting.py         # 报告生成与导出测试
+│   ├── test_report_service.py    # 报告服务测试
 │   ├── test_ui_pages.py          # UI 页面行为测试
 │   ├── test_workspace_pages.py   # 工作区子页面行为测试
+│   ├── test_save_flow.py         # 保存流程状态机测试
+│   ├── test_workspace_service.py # 工作区服务测试
 │   └── test_scroll.py            # 滚动交互测试
 └── docs/
     ├── prism.md                  # 本文档

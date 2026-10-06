@@ -9,6 +9,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from db.models import ProjectRepository
+from services.reports import ReportService
+from services.workspace import WorkspaceService
 from ui.event_page import EventPage
 from ui.persona_page import PersonaPage
 from ui.result_page import ResultPage
@@ -33,9 +36,6 @@ from ui.styles import (
     workspace_step_tag_qss,
 )
 from ui.widgets import Divider, PrimaryBtn, SecondaryBtn, StatusDot
-from db.models import ProjectRepository, ReportRepository
-from report.exporter import ReportExporter
-from services.workspace import WorkspaceService
 
 
 class ProcessPage(QWidget):
@@ -47,6 +47,7 @@ class ProcessPage(QWidget):
         self._step = 0
         self._saved_steps: set[int] = set()
         self._ws = WorkspaceService()
+        self._rs = ReportService()
         self._build()
         self._wire()
 
@@ -165,13 +166,7 @@ class ProcessPage(QWidget):
                 repo.update_scenario(
                     self._pid, dict(project.scenario), status="completed"
                 )
-            md = ReportExporter.to_markdown(r, res)
-            ReportRepository().save_or_update_latest(
-                project_id=self._pid,
-                title=f"{r.project_name} - 供应链演化仿真报告",
-                markdown=md,
-                summary=r.to_dict(),
-            )
+            self._rs.persist(self._pid, r, res)
         except Exception as e:
             self._log_msg(f"数据保存失败：{e}")
 
