@@ -13,6 +13,13 @@ from ui.styles import (
 )
 
 
+def set_style_state(widget: QWidget, name: str, on: bool) -> None:
+    """切换 QSS 属性选择器状态（配合样式表中的 [name="true"] 规则）。"""
+    widget.setProperty(name, on)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+
+
 class Card(QFrame):
     """白底 + 细线边框卡片"""
     def __init__(self, parent=None, padding=PAD_LG):
@@ -366,6 +373,7 @@ class TipLabel(QLabel):
         popup.destroyed.connect(lambda *args, p=popup: cls._on_popup_gone(p))
         cls._popup = popup
         cls._owner = owner
+        set_style_state(owner, "tipActive", True)
         app = QApplication.instance()
         if app is not None and not cls._filter_installed:
             app.installEventFilter(_TIP_DISMISS_FILTER)
@@ -373,9 +381,15 @@ class TipLabel(QLabel):
 
     @classmethod
     def hide_tip(cls) -> None:
+        owner = cls._owner
         popup = cls._popup
         cls._popup = None
         cls._owner = None
+        if owner is not None:
+            try:
+                set_style_state(owner, "tipActive", False)
+            except RuntimeError:
+                pass  # 宿主已随应用退出被销毁
         if popup is not None:
             try:
                 popup.close()  # WA_DeleteOnClose：关闭即销毁

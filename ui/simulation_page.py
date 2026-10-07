@@ -21,6 +21,7 @@ from services.ai import CLIENT_UNAVAILABLE_MESSAGE
 from services.simulation import SimulationRun, SimulationService
 from ui.scroll import ChainingTextEdit
 from ui.styles import (
+    COLOR_RED_STRONG,
     PAD_SM,
     PAD_XL,
     TEXT_PRIMARY,
@@ -230,6 +231,8 @@ class SimulationPage(QWidget):
         self._log.setStyleSheet(simulation_log_qss())
         # 滚动条贴控件右边框（padding=0），文本左右间距由 viewport margins 对称控制
         self._log.setViewportMargins(8, 5, 8, 5)
+        # 空态占位：未开始仿真时说明该区域将承载内容
+        self._log.setPlaceholderText("启动仿真后，行为体的发言与轮次摘要将在此展开")
         layout.addWidget(self._log, 1)
 
         self._refresh_llm_caption()
@@ -265,7 +268,7 @@ class SimulationPage(QWidget):
             return
         escaped = html.escape(text)
         if is_error:
-            self._log.append(f"<span style='color:#CC3333'>{escaped}</span>")
+            self._log.append(f"<span style='color:{COLOR_RED_STRONG}'>{escaped}</span>")
         else:
             self._log.append(escaped)
 

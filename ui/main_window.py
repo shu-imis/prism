@@ -156,5 +156,9 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _center(self):
+        """窗口打开时在屏幕可用区内居中。"""
         g = self.screen().availableGeometry()
-        self.move((g.width() - self.width()) // 2, (g.height() - self.height()) // 2)
+        self.move(
+            g.x() + (g.width() - self.width()) // 2,
+            g.y() + (g.height() - self.height()) // 2,
+        )

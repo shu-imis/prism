@@ -1,12 +1,13 @@
-"""滚动交互测试：像素滚动与滚轮链式传递。"""
+"""滚动交互测试：像素滚动、滚轮链式传递与 Tab 焦点导航。"""
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QLineEdit, QVBoxLayout, QWidget
 
-from tests.qt_helpers import QtDbTestCase
-from ui.scroll import ChainingTextEdit, SmoothScrollArea
+from tests.qt_helpers import QtDbTestCase, app as _app
+from ui.scroll import ChainingPlainTextEdit, ChainingTextEdit, SmoothScrollArea
 
 
 def _wheel(pixel_y: int = 0, angle_y: int = 0, pixel_x: int = 0) -> QWheelEvent:
@@ -91,3 +92,29 @@ class WheelChainTests(QtDbTestCase):
         host.edit.wheelEvent(event)
         self.assertTrue(event.isAccepted())
         self.assertGreater(inner_bar.value(), 0)
+
+
+class TabNavigationTests(QtDbTestCase):
+    def test_tab_leaves_multiline_editors(self) -> None:
+        """多行文本控件让位 Tab：焦点依次走过两个文本框到单行输入。"""
+        host = self.track(QWidget())
+        layout = QVBoxLayout(host)
+        text_edit = ChainingTextEdit()
+        plain_text = ChainingPlainTextEdit()
+        line = QLineEdit()
+        for w in (text_edit, plain_text, line):
+            layout.addWidget(w)
+        host.resize(300, 300)
+        host.show()
+        _app().processEvents()
+
+        text_edit.setFocus()
+        _app().processEvents()
+        self.assertTrue(text_edit.hasFocus())
+        QTest.keyClick(text_edit, Qt.Key_Tab)
+        _app().processEvents()
+        self.assertTrue(plain_text.hasFocus())
+
+        QTest.keyClick(plain_text, Qt.Key_Tab)
+        _app().processEvents()
+        self.assertTrue(line.hasFocus())

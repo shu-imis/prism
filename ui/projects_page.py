@@ -19,7 +19,7 @@ from ui.styles import (
     project_name_qss,
     project_status_qss,
 )
-from ui.widgets import Title, Caption, ConfirmDialog, PrimaryBtn, DangerBtn, PopupMenu, StatusDot, clear_layout
+from ui.widgets import Title, Caption, ConfirmDialog, PrimaryBtn, DangerBtn, PopupMenu, StatusDot, clear_layout, set_style_state
 from services.workspace import WorkspaceService
 
 
@@ -193,6 +193,15 @@ class ProjectsPage(QWidget):
             menu.add_action("彻底删除", lambda: self._confirm_hard_delete(proj.id, proj.name))
         else:
             menu.add_action("删除", lambda: self._confirm_delete(proj.id, proj.name))
+
+        def _clear_active(*_):
+            try:
+                set_style_state(btn, "menuActive", False)
+            except RuntimeError:
+                pass  # 卡片已随列表刷新被销毁
+
+        menu.destroyed.connect(_clear_active)
+        set_style_state(btn, "menuActive", True)
         menu.popup(btn.mapToGlobal(pos))
 
     def _restore(self, pid):

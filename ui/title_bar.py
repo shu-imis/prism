@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, QPoint, QPointF, QRect, QRectF, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QPushButton, QWidget,
 )
-from PySide6.QtGui import QCursor, QMouseEvent, QPainter, QPen, QColor
+from PySide6.QtGui import QCursor, QMouseEvent, QPainter, QPainterPath, QPen, QColor
 
 from ui.styles import (
     BG_PAGE, BG_SIDEBAR, BORDER, SIDEBAR_W, TEXT_PRIMARY, TEXT_MUTED, TEXT_ON_DARK,
@@ -26,9 +26,20 @@ if _forced in ("macos", "windows"):
 else:
     IS_MAC = sys.platform == "darwin"
 
+# 系统外观复刻色（macOS 红绿灯 / Windows 10 窗口按钮），独立于应用调色板
+MAC_CLOSE_COLOR = "#FF5F57"
+MAC_MIN_COLOR = "#FFBD2E"
+MAC_MAX_COLOR = "#28CA41"
+MAC_INACTIVE_COLOR = "#D0D0D0"      # 失焦时的灰点
+WIN_HOVER_COLOR = "#E5E5E5"
+WIN_PRESSED_COLOR = "#DBDBDB"
+WIN_CLOSE_COLOR = "#E81123"
+WIN_CLOSE_PRESSED_COLOR = "#BF1700"
+WIN_INACTIVE_GLYPH_COLOR = "#BBBBBB"
+
 
 class _MacTraffic(QPushButton):
-    """macOS 红绿灯按钮 — 悬停组内任一颗时整组显示符号"""
+    """macOS 红绿灯按钮 — 悬停态由标题栏按胶囊触发区整组驱动"""
 
     def __init__(self, color, symbol, parent=None):
         super().__init__(parent)
@@ -38,6 +49,7 @@ class _MacTraffic(QPushButton):
         self._active = True
         self.setFixedSize(MAC_BTN_SIZE, MAC_BTN_SIZE)
         self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)  # 窗口按钮不进 Tab 序列
 
     def set_group_hover(self, on: bool):
         if self._group_hover != on:
@@ -49,21 +61,11 @@ class _MacTraffic(QPushButton):
             self._active = active
             self.update()
 
-    def enterEvent(self, event):
-        for btn in self.parentWidget().findChildren(_MacTraffic):
-            btn.set_group_hover(True)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        for btn in self.parentWidget().findChildren(_MacTraffic):
-            btn.set_group_hover(False)
-        super().leaveEvent(event)
-
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         # 悬停时按钮「唤醒」为激活色，其余界面保持失焦灰
-        fill = QColor(self._color if (self._active or self._group_hover) else "#D0D0D0")
+        fill = QColor(self._color if (self._active or self._group_hover) else MAC_INACTIVE_COLOR)
         if self.isDown():
             fill = fill.darker(120)  # 按压加深 20%，对齐原生
         p.setPen(Qt.NoPen)
@@ -94,6 +96,7 @@ class _WinButton(QPushButton):
 
         self.setFixedSize(46, 32)
         self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)  # 窗口按钮不进 Tab 序列
         self.clicked.connect(signal.emit)
 
     def set_active(self, active):
@@ -106,14 +109,6 @@ class _WinButton(QPushButton):
             self._hover = on
             self.update()
 
-    def enterEvent(self, event):
-        self.set_hovered(True)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        self.set_hovered(False)
-        super().leaveEvent(event)
-
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -122,9 +117,9 @@ class _WinButton(QPushButton):
 
         # 背景（悬停/按下色值对齐 Windows 10 原生）
         if self._kind == "close" and (self._hover or self.isDown()):
-            p.fillRect(self.rect(), QColor("#BF1700") if self.isDown() else QColor("#E81123"))
+            p.fillRect(self.rect(), QColor(WIN_CLOSE_PRESSED_COLOR) if self.isDown() else QColor(WIN_CLOSE_COLOR))
         elif self._hover or self.isDown():
-            p.fillRect(self.rect(), QColor("#DBDBDB") if self.isDown() else QColor("#E5E5E5"))
+            p.fillRect(self.rect(), QColor(WIN_PRESSED_COLOR) if self.isDown() else QColor(WIN_HOVER_COLOR))
 
         # 符号（悬停/按下时「唤醒」为激活色，其余界面保持失焦灰）
         if self._hover and self._kind == "close":
@@ -132,7 +127,7 @@ class _WinButton(QPushButton):
         elif self._active or self._hover or self.isDown():
             pen_color = QColor(TEXT_MUTED)
         else:
-            pen_color = QColor("#BBB")
+            pen_color = QColor(WIN_INACTIVE_GLYPH_COLOR)
         p.setPen(QPen(pen_color, 1.2))
 
         cx, cy = w // 2, h // 2
@@ -179,22 +174,29 @@ class TitleBar(QWidget):
             layout.setContentsMargins(10, 0, 2, 0)
             self._build_windows(layout)
 
-        # macOS 不向后台应用投递悬停事件，失焦期间由轮询光标驱动悬停态
+        # 悬停态由光标轮询统一驱动：系统不向失焦应用投递悬停事件；
+        # 红绿灯触发区是包裹三颗圆点的胶囊，按光标位置判定而非控件边界
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(33)
         self._poll_timer.timeout.connect(self._poll_hover)
+        self._poll_timer.start()
 
     def _poll_hover(self):
         # 模态弹窗在前时，背景窗口不响应悬停
         if QApplication.activeModalWidget() is not None:
             self._apply_hover(None)
             return
+        # 按住鼠标期间（拖拽中）冻结悬停，松开后由下一轮按光标位置校正
+        if QApplication.mouseButtons() != Qt.NoButton:
+            return
         self._apply_hover(self.childAt(self.mapFromGlobal(QCursor.pos())))
 
     def _apply_hover(self, child):
-        """按光标下的子控件驱动悬停态；child 为 None 时全部清除。"""
+        """按光标位置驱动悬停态；child 为 None 时全部清除。"""
         if IS_MAC:
-            on = isinstance(child, _MacTraffic)
+            on = child is not None and self._mac_capsule.contains(
+                self._mac_area.mapFromGlobal(QCursor.pos())
+            )
             for btn in self._mac_buttons:
                 btn.set_group_hover(on)
         else:
@@ -211,7 +213,7 @@ class TitleBar(QWidget):
         p.end()
 
     def set_active(self, active: bool):
-        """窗口焦点变化时更新标题栏外观；失焦期间启动光标轮询补齐悬停事件"""
+        """窗口焦点变化时更新标题栏外观。"""
         if IS_MAC:
             for btn in self._mac_buttons:
                 btn.set_active(active)
@@ -220,20 +222,16 @@ class TitleBar(QWidget):
                 btn.set_active(active)
         c = TEXT_PRIMARY if active else TEXT_MUTED
         self._brand_label.setStyleSheet(title_brand_qss(c))
-        if active:
-            self._poll_timer.stop()
-            self._apply_hover(None)  # 交还给正常事件通道
-        else:
-            self._poll_timer.start()
 
     # --- macOS：左侧红绿灯 ---
 
     def _build_macos(self, layout):
-        close_btn = self._mac_traffic("#FF5F57", "close", self.closed)
-        min_btn = self._mac_traffic("#FFBD2E", "min", self.minimized)
-        max_btn = self._mac_traffic("#28CA41", "max", self.maximized)
+        close_btn = self._mac_traffic(MAC_CLOSE_COLOR, "close", self.closed)
+        min_btn = self._mac_traffic(MAC_MIN_COLOR, "min", self.minimized)
+        max_btn = self._mac_traffic(MAC_MAX_COLOR, "max", self.maximized)
 
         # 按钮组打包固定宽度
+        area_w = MAC_BTN_SIZE * 3 + MAC_BTN_SPACING * 2
         btn_area = QWidget()
         bl = QHBoxLayout(btn_area)
         bl.setContentsMargins(0, 0, 0, 0)
@@ -241,7 +239,14 @@ class TitleBar(QWidget):
         bl.addWidget(close_btn)
         bl.addWidget(min_btn)
         bl.addWidget(max_btn)
-        btn_area.setFixedWidth(MAC_BTN_SIZE * 3 + MAC_BTN_SPACING * 2)
+        btn_area.setFixedWidth(area_w)
+
+        # 悬停判定区：刚好包裹三颗圆点的胶囊（圆角取圆点半径）
+        self._mac_area = btn_area
+        self._mac_capsule = QPainterPath()
+        self._mac_capsule.addRoundedRect(
+            QRectF(0, 0, area_w, MAC_BTN_SIZE), MAC_BTN_SIZE / 2, MAC_BTN_SIZE / 2
+        )
 
         # 左侧为侧栏延伸区（与 paintEvent 的色带同宽），红绿灯落在其上
         left = QWidget()

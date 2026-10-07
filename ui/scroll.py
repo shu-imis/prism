@@ -1,8 +1,9 @@
 """滚动交互组件。
 
-两个 Qt 默认行为的修正：
+三个 Qt 默认行为的修正：
 - SmoothScrollArea：触控板滚轮按像素 1:1 驱动（Qt 默认按行步进）；
-- 链式文本控件：滚轮事件在自身滚到头后交还外层（Qt 默认无条件吞掉）。
+- 链式文本控件：滚轮事件在自身滚到头后交还外层（Qt 默认无条件吞掉）；
+- 链式文本控件：Tab 让位焦点导航，不在框内插入缩进（Qt 默认吞掉）。
 """
 from __future__ import annotations
 
@@ -65,8 +66,16 @@ class _WheelChain:
 
 
 class ChainingTextEdit(_WheelChain, QTextEdit):
-    """滚到头的 QTextEdit 把滚轮事件交还外层。"""
+    """滚到头的 QTextEdit 把滚轮事件交还外层；Tab 让位焦点导航。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setTabChangesFocus(True)
 
 
 class ChainingPlainTextEdit(_WheelChain, QPlainTextEdit):
-    """滚到头的 QPlainTextEdit 把滚轮事件交还外层。"""
+    """滚到头的 QPlainTextEdit 把滚轮事件交还外层；Tab 让位焦点导航。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setTabChangesFocus(True)

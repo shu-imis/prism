@@ -10,7 +10,9 @@ BG_SIDEBAR = "#F5F5F0"
 BG_SURFACE = "#FFFFFF"
 BG_HOVER = "#F0F0EB"
 BG_PRESSED = "#E4E4DF"
+BG_PRESSED_DEEP = "#D8D8D3"  # 加/减键按下，比 BG_PRESSED 再深一档
 BG_INPUT = "#F5F5F0"
+BG_DISABLED = "#CCCCCC"
 
 ACCENT = "#C4A265"
 ACCENT_HOVER = "#B8963E"
@@ -27,18 +29,24 @@ COLOR_GREEN = "#6B8E6B"
 COLOR_RED = "#C46B6B"
 COLOR_RED_HOVER = "#B25C5C"
 COLOR_RED_PRESSED = "#9E5252"
+COLOR_RED_STRONG = "#CC3333"  # 浅底日志区的报错红，比主题红更亮
 COLOR_ORANGE = "#D4A853"
 COLOR_BLUE = "#6B8EB3"
 
 # 失焦（窗口非激活）时的收敛色
 TEXT_INACTIVE = "#AAAAA5"
+
+# 侧栏选中底：激活与失焦两个层次（失焦档比激活档浅一档）
+BG_ACTIVE_CHECKED = "#E8E8E8"
 BG_INACTIVE_CHECKED = "#EFEFEA"
 
 # 语义化表面色：新增深色表面时在此登记，滚动条等派生颜色即自动适配
 BG_TERMINAL = TEXT_PRIMARY
+TERMINAL_TEXT = "#AAAAAA"
 
 # 深色表面上的文字与语义色（结论横幅等，比浅色页面版亮一档）
 DARK_TEXT = "#F5F5F2"
+DARK_SECONDARY = "#AAAAA5"
 DARK_MUTED = "#8A8A86"
 DARK_GOOD = "#9CC49C"
 DARK_BAD = "#D98C8C"
@@ -81,6 +89,13 @@ def _luminance(hex_color: str) -> float:
     h = hex_color.lstrip("#")
     r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
     return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def _alpha(hex_color: str, opacity: float) -> str:
+    """同色透明派生：由调色板色值生成 rgba(...)，供禁用态等混合使用。"""
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{opacity})"
 
 
 def _scrollbar_qss(bg: str, scope: str = "") -> str:
@@ -164,8 +179,7 @@ QMainWindow {{ background: {BG_PAGE}; }}
     color: {TEXT_PRIMARY};
 }}
 #sidebar QPushButton:checked {{
-    /* 激活窗口的选中底色，比失焦态 BG_INACTIVE_CHECKED 略深一档以区分焦点层次 */
-    background: #E8E8E8;
+    background: {BG_ACTIVE_CHECKED};
     color: {TEXT_PRIMARY};
     font-weight: 600;
 }}
@@ -194,7 +208,7 @@ PopupMenu {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; }}
 }}
 #primaryBtn:hover {{ background: {ACCENT}; }}
 #primaryBtn:pressed {{ background: {ACCENT_HOVER}; }}
-#primaryBtn:disabled {{ background: #CCC; color: #999; }}
+#primaryBtn:disabled {{ background: {BG_DISABLED}; color: {TEXT_MUTED}; }}
 
 #secondaryBtn {{
     background: {BG_SURFACE};
@@ -227,7 +241,7 @@ PopupMenu {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; }}
 }}
 #dangerBtn:hover {{ background: {COLOR_RED_HOVER}; }}
 #dangerBtn:pressed {{ background: {COLOR_RED_PRESSED}; }}
-#dangerBtn:disabled {{ background: rgba(196,107,107,0.15); color: rgba(196,107,107,0.5); }}
+#dangerBtn:disabled {{ background: {_alpha(COLOR_RED, 0.15)}; color: {_alpha(COLOR_RED, 0.5)}; }}
 
 /* ---- 输入 ---- */
 QLineEdit, QPlainTextEdit, QTextEdit {{
@@ -254,6 +268,7 @@ QSlider::handle:horizontal {{
     border-radius: 0px;
 }}
 QSlider::handle:horizontal:hover {{ background: {ACCENT}; }}
+QSlider::handle:horizontal:pressed {{ background: {ACCENT_HOVER}; }}
 QSlider::sub-page:horizontal {{ background: {TEXT_PRIMARY}; border-radius: 0px; }}
 
 /* ---- 滚动条（把手颜色由背景亮度自动推导，见 _scrollbar_qss） ---- */
@@ -352,21 +367,21 @@ def tip_popup_qss() -> str:
 
 
 def stepper_button_qss(inner_edge: str) -> str:
-    """数值步进器加/减键；inner_edge 为靠输入框一侧（"left"/"right"），该侧边框并入输入框。"""
+    """数值步进器加/减键；inner_edge 为靠输入框一侧（"left"/"right"），该侧边框让给输入框绘制；悬停/按下深一档灰阶，与数字区明确区分。"""
     return (
         f"QPushButton{{background:{BG_SURFACE};border:1px solid {BORDER};"
         f"border-{inner_edge}:none;font-size:14px;color:{TEXT_PRIMARY};}}"
-        f"QPushButton:hover{{background:{BG_HOVER};}}"
-        f"QPushButton:pressed{{background:{BG_PRESSED};}}"
-        f"QPushButton:disabled{{background:{BG_SURFACE};color:rgba(26,26,26,0.3);}}"
+        f"QPushButton:hover{{background:{BG_PRESSED};}}"
+        f"QPushButton:pressed{{background:{BG_PRESSED_DEEP};}}"
+        f"QPushButton:disabled{{background:{BG_SURFACE};color:{_alpha(TEXT_PRIMARY, 0.3)};}}"
     )
 
 
 def stepper_input_qss() -> str:
-    """数值步进器输入框：两侧边框由加减键提供。"""
+    """数值步进器输入框：浅灰底与其他输入框一致；与加减键以细线分隔。"""
     return (
         f"QLineEdit{{background:{BG_INPUT};border:1px solid {BORDER};"
-        f"border-left:none;border-right:none;font-family:'JetBrains Mono';font-size:13px;color:{TEXT_PRIMARY};}}"
+        f"font-family:'JetBrains Mono';font-size:13px;color:{TEXT_PRIMARY};}}"
         f"QLineEdit:focus{{border:1px solid {TEXT_PRIMARY};}}"
     )
 
@@ -418,7 +433,7 @@ def terminal_qss() -> str:
     """日志终端控制台（#terminalLog，配色与全局滚动条作用域同源）。"""
     return (
         "QPlainTextEdit{"
-        f"background:{BG_TERMINAL};color:#AAA;"
+        f"background:{BG_TERMINAL};color:{TERMINAL_TEXT};"
         "font-family:'JetBrains Mono','Noto Sans SC';font-size:11px;"
         "border:none;padding:0px;"
         "}"
@@ -439,10 +454,10 @@ def simulation_log_qss() -> str:
 # ============================================================
 
 def project_card_qss(clickable: bool) -> str:
-    """项目卡片按钮；回收站卡片不可点击（clickable=False），无悬停描边。"""
+    """项目卡片按钮；悬停描边仅左键可点的卡片有，右键菜单打开期间目标卡片描边加深。"""
     qss = f"QPushButton {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; border-radius: {RADIUS}px; }}"
-    if clickable:
-        qss += f"QPushButton:hover {{ border-color: {TEXT_PRIMARY}; }}"
+    hover = "QPushButton:hover, " if clickable else ""
+    qss += f'{hover}QPushButton[menuActive="true"] {{ border-color: {TEXT_PRIMARY}; }}'
     return qss
 
 
@@ -491,7 +506,7 @@ def banner_meta_qss() -> str:
 
 def banner_summary_qss() -> str:
     """横幅演化概述。"""
-    return "font-size:12px;color:#AAAAA5;"
+    return f"font-size:12px;color:{DARK_SECONDARY};"
 
 
 def verdict_qss(color: str) -> str:
@@ -536,8 +551,12 @@ def table_cell_qss() -> str:
 # ============================================================
 
 def swimlane_header_qss(has_event: bool) -> str:
-    """周期表头：含关键事件的周期标红。"""
-    return f"color:{COLOR_RED if has_event else TEXT_MUTED};"
+    """周期表头：含关键事件的周期标红，可点击；悬停或提示打开时转为常规文字色。"""
+    color = COLOR_RED if has_event else TEXT_MUTED
+    qss = f"QLabel {{ color: {color}; }}"
+    if has_event:
+        qss += f' QLabel:hover, QLabel[tipActive="true"] {{ color: {TEXT_PRIMARY}; }}'
+    return qss
 
 
 def swimlane_name_qss() -> str:
@@ -546,8 +565,13 @@ def swimlane_name_qss() -> str:
 
 
 def swimlane_cell_qss(color: str = "") -> str:
-    """行动色块；color 为空表示该周期无行动（透明空格）。"""
-    return f"background:{color};" if color else "background:transparent;"
+    """行动色块；color 为空表示该周期无行动（透明空格）。有行动的色块可点击，悬停或提示打开时加描边。"""
+    if not color:
+        return "QLabel { background: transparent; }"
+    return (
+        f"QLabel {{ background: {color}; }}"
+        f' QLabel:hover, QLabel[tipActive="true"] {{ border: 1px solid {TEXT_PRIMARY}; }}'
+    )
 
 
 def legend_dot_qss(color: str) -> str:
