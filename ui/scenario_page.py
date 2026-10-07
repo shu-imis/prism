@@ -188,7 +188,7 @@ class NodeEditor(QWidget):
             self.add_node(n)
 
 
-class EventPage(QWidget):
+class ScenarioPage(QWidget):
     project_saved = Signal(int)
 
     def __init__(self, parent=None):
@@ -198,7 +198,7 @@ class EventPage(QWidget):
         self._form_baseline = None
         self._ws = WorkspaceService()
         self._flow = SaveFlow(self)
-        # 终端日志回调：默认空实现，由 ProcessPage 注入覆盖（单独实例化也能用）
+        # 终端日志回调：默认空实现，由 WorkspacePage 注入覆盖（单独实例化也能用）
         self.log = lambda *args, **kwargs: None
         self._build()
 

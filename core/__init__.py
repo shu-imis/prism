@@ -1,4 +1,4 @@
-"""Prism — 供应链决策推演工具"""
+"""Prism 核心层 — 数据模型、场景解析与仿真引擎"""
 
 from typing import Any
 

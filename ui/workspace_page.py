@@ -9,10 +9,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from services.reports import ReportService
+from services.report import ReportService
 from services.simulation import SimulationService
 from services.workspace import WorkspaceService
-from ui.event_page import EventPage
+from ui.scenario_page import ScenarioPage
 from ui.persona_page import PersonaPage
 from ui.result_page import ResultPage
 from ui.scroll import ChainingPlainTextEdit
@@ -38,7 +38,7 @@ from ui.styles import (
 from ui.widgets import Divider, PrimaryBtn, SecondaryBtn, StatusDot
 
 
-class ProcessPage(QWidget):
+class WorkspacePage(QWidget):
     open_settings = Signal()  # 转发仿真页的「前往设置」请求
 
     def __init__(self, parent=None):
@@ -90,11 +90,11 @@ class ProcessPage(QWidget):
         body.setSpacing(0)
 
         self._stack = QStackedWidget()
-        self._ep = EventPage()
+        self._scp = ScenarioPage()
         self._sp = PersonaPage()
         self._smp = SimulationPage()
         self._rp = ResultPage()
-        for p in [self._ep, self._sp, self._smp, self._rp]:
+        for p in [self._scp, self._sp, self._smp, self._rp]:
             self._stack.addWidget(p)
         body.addWidget(self._stack, 1)
 
@@ -133,13 +133,13 @@ class ProcessPage(QWidget):
         self._update()
 
     def _wire(self):
-        self._ep.project_saved.connect(self._on_saved)
+        self._scp.project_saved.connect(self._on_saved)
         self._sp.agents_saved.connect(self._on_saved)
         self._smp.simulation_completed.connect(self._on_done)
         self._smp.state_changed.connect(self._update)
         self._smp.open_settings.connect(self.open_settings.emit)
         # 将终端日志出口注入各页面
-        self._ep.log = self._log_msg
+        self._scp.log = self._log_msg
         self._sp.log = self._log_msg
         self._smp.set_log_sink(self._log_msg)
 
@@ -168,7 +168,7 @@ class ProcessPage(QWidget):
 
     def _next_clicked(self):
         if self._step == 0:
-            self._ep.save()
+            self._scp.save()
         elif self._step == 1:
             # 统一走保存：无改动即纯导航，有改动交给保存流程处理
             self._sp.save()
@@ -235,7 +235,7 @@ class ProcessPage(QWidget):
     def _step_status(self) -> tuple[str, str]:
         """当前步骤的状态文案与颜色。"""
         if self._step in (0, 1):
-            page = self._ep if self._step == 0 else self._sp
+            page = self._scp if self._step == 0 else self._sp
             if page.has_unsaved_changes():
                 return "编辑中", TEXT_MUTED
             if self._step in self._saved_steps:
@@ -264,7 +264,7 @@ class ProcessPage(QWidget):
             self._saved_steps.add(1)
         self._update()
         self._log.clear()
-        self._ep.load_project(pid)
+        self._scp.load_project(pid)
         self._log_msg(f"项目已加载（#{pid}）")
         if self._is_sim_done():
             self._smp.load_project(pid)    # 预加载 Step 3 历史
@@ -288,7 +288,7 @@ class ProcessPage(QWidget):
     def iter_ai_workers(self) -> list:
         """各子页面运行中的 AI worker 合并列表（供主窗口关窗前统一兜底）。"""
         workers = []
-        for page in (self._ep, self._sp, self._smp, self._rp):
+        for page in (self._scp, self._sp, self._smp, self._rp):
             workers.extend(getattr(page, "_ai_workers", None) or [])
         return workers
 
@@ -298,7 +298,7 @@ class ProcessPage(QWidget):
         self._saved_steps = set()
         self._update()
         self._log.clear()
-        self._ep.reset()
+        self._scp.reset()
         self._sp.reset()
         self._smp.reset()
         self._rp.reset()

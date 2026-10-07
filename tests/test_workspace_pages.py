@@ -6,9 +6,9 @@ import unittest
 from db.models import ProjectRepository, ReportRepository
 from report.generator import SimulationReport
 from tests.qt_helpers import QtDbTestCase
-from ui.event_page import EventPage, NodeEditor
+from ui.scenario_page import ScenarioPage, NodeEditor
 from ui.persona_page import PersonaPage
-from ui.process_page import ProcessPage
+from ui.workspace_page import WorkspacePage
 from ui.result_page import ResultPage
 
 
@@ -41,17 +41,17 @@ class NodeEditorTests(QtDbTestCase):
         })
 
 
-class EventPageTests(QtDbTestCase):
+class ScenarioPageTests(QtDbTestCase):
     def test_number_inputs_parse_defaults(self) -> None:
         """整型参数的默认值必须能被 NumberInput 解析（float 字符串会静默回落到最小值）。"""
-        page = self.track(EventPage())
+        page = self.track(ScenarioPage())
         self.assertEqual(page._inv.value(), 75)
         self.assertEqual(page._cost.value(), 50)
         self.assertAlmostEqual(page._svc.value(), 0.85)
 
     def test_save_rejects_empty_title(self) -> None:
         """空标题不允许创建项目。"""
-        page = self.track(EventPage())
+        page = self.track(ScenarioPage())
         errors: list[str] = []
         page.log = lambda msg, is_error=False: errors.append(msg) if is_error else None
         fired: list[int] = []
@@ -67,7 +67,7 @@ class EventPageTests(QtDbTestCase):
         """改名保存时项目名同步回写。"""
         repo = ProjectRepository()
         p = repo.create("旧名", {"background": "背景"})
-        page = self.track(EventPage())
+        page = self.track(ScenarioPage())
         page.load_project(p.id)
 
         page._title.setText("新名")
@@ -78,7 +78,7 @@ class EventPageTests(QtDbTestCase):
 
     def test_save_creates_project_for_new_page(self) -> None:
         """新建项目首次保存以表单内容建库并广播项目 id。"""
-        page = self.track(EventPage())
+        page = self.track(ScenarioPage())
         fired: list[int] = []
         page.project_saved.connect(fired.append)
 
@@ -95,7 +95,7 @@ class EventPageTests(QtDbTestCase):
 
     def test_reset_clears_industry_and_restores_defaults(self) -> None:
         """reset 清空行业输入并恢复参数默认值。"""
-        page = self.track(EventPage())
+        page = self.track(ScenarioPage())
         page._industry.setText("电子制造")
         page._inv.setValue(10)
         page.reset()
@@ -105,7 +105,7 @@ class EventPageTests(QtDbTestCase):
 
     def test_docs_imported_result_dropped_after_project_switch(self) -> None:
         """导入完成回调的 pid 与当前项目不符时丢弃结果。"""
-        page = self.track(EventPage())
+        page = self.track(ScenarioPage())
         page._pid = 999  # 等待导入期间已切换到其他项目
         page._on_docs_imported(["旧项目文档"], pid=None)
         self.assertEqual(page._imported, [])
@@ -129,13 +129,13 @@ class PersonaPageTests(QtDbTestCase):
         self.assertTrue(errors)
 
 
-class ProcessPageWorkerTests(QtDbTestCase):
+class WorkspacePageWorkerTests(QtDbTestCase):
     def test_iter_ai_workers_merges_subpages(self) -> None:
         """iter_ai_workers 合并各子页面的 _ai_workers，供关窗兜底。"""
-        page = self.track(ProcessPage())
+        page = self.track(WorkspacePage())
         self.assertEqual(page.iter_ai_workers(), [])
         sentinel = object()
-        page._ep._ai_workers = [sentinel]
+        page._scp._ai_workers = [sentinel]
         self.assertEqual(page.iter_ai_workers(), [sentinel])
 
 

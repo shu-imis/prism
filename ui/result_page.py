@@ -18,7 +18,7 @@ from core.constants import METRICS
 from report.exporter import ReportExporter
 from report.generator import SimulationReport, recommendation_level
 from services.ai import CLIENT_UNAVAILABLE_MESSAGE, analyze_evolution, prepare_client
-from services.reports import ReportService
+from services.report import ReportService
 from ui.ai_worker import run_ai_task_with_button
 from ui.charts import MetricsChart, RadarChart, SwimlaneGrid
 from ui.scroll import SmoothScrollArea

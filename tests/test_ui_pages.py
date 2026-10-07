@@ -44,7 +44,7 @@ class MainWindowSignalRoutingTests(QtDbTestCase):
         w._projects.open_project.emit(pid)
         self.assertEqual(w._stack.currentIndex(), 1)
         self.assertEqual(w._projects._mode, "active")
-        self.assertEqual(w._process._pid, pid)
+        self.assertEqual(w._workspace._pid, pid)
 
     def test_open_project_from_trash_mode_goes_to_workspace(self) -> None:
         pid = ProjectRepository().create("示例", {}).id
@@ -63,9 +63,9 @@ class MainWindowSignalRoutingTests(QtDbTestCase):
         w = self.track(MainWindow())
         w._projects.open_project.emit(pid)
         w._projects.project_deleted.emit(other)
-        self.assertEqual(w._process._pid, pid)
+        self.assertEqual(w._workspace._pid, pid)
         w._projects.project_deleted.emit(pid)
-        self.assertIsNone(w._process._pid)
+        self.assertIsNone(w._workspace._pid)
         self.assertEqual(w._stack.currentIndex(), 0)
 
     def test_delete_actions_emit_project_deleted(self) -> None:
@@ -172,13 +172,13 @@ class WorkspaceNavActionTests(QtDbTestCase):
     def test_nav_mirrors_simulation_action_state(self) -> None:
         w = self.track(MainWindow())
         w._go(1)
-        w._process._step = 2
-        w._process._smp._set_action("⏸ 暂停")
-        self.assertEqual(w._process._next.text(), "⏸ 暂停")
-        w._process._smp._set_action("↺ 恢复仿真")
-        self.assertEqual(w._process._next.text(), "↺ 恢复仿真")
-        w._process._smp._set_action("✓ 已完成", False)
-        self.assertFalse(w._process._next.isEnabled())
+        w._workspace._step = 2
+        w._workspace._smp._set_action("⏸ 暂停")
+        self.assertEqual(w._workspace._next.text(), "⏸ 暂停")
+        w._workspace._smp._set_action("↺ 恢复仿真")
+        self.assertEqual(w._workspace._next.text(), "↺ 恢复仿真")
+        w._workspace._smp._set_action("✓ 已完成", False)
+        self.assertFalse(w._workspace._next.isEnabled())
 
 
 class SimulationHistorySpeechTests(QtDbTestCase):

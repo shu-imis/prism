@@ -14,7 +14,7 @@ from db.models import (
     SimulationRoundRepository,
 )
 from report.generator import SimulationReport
-from services.reports import ReportService
+from services.report import ReportService
 
 
 class ReportServiceTests(unittest.TestCase):

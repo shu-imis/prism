@@ -267,8 +267,8 @@ prism/
 │   ├── title_bar.py              # 自定义标题栏（macOS / Windows）
 │   ├── projects_page.py          # 项目页 — 项目列表 / 回收站
 │   ├── settings_page.py          # 设置 — 全局 LLM 配置与仿真参数
-│   ├── process_page.py           # 工作区 — 4 步流程协调
-│   ├── event_page.py             # 供应链搭建（Step 01）
+│   ├── workspace_page.py         # 工作区 — 4 步流程协调
+│   ├── scenario_page.py          # 供应链搭建（Step 01）
 │   ├── persona_page.py           # 行为体性格配置（Step 02）
 │   ├── simulation_page.py        # 仿真运行（Step 03）
 │   ├── result_page.py            # 演化分析（Step 04）
@@ -303,7 +303,7 @@ prism/
 │   └── models.py                 # 数据模型 + Repository
 ├── services/
 │   ├── workspace.py              # 工作区服务：项目装载、保存与知识库
-│   ├── reports.py                # 报告服务：结果装载与持久化
+│   ├── report.py                 # 报告服务：结果装载与持久化
 │   ├── simulation.py             # 仿真服务：运行准备与状态收尾
 │   └── ai.py                     # AI 动作服务：业务入口与客户端准备
 ├── tests/

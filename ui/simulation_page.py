@@ -170,7 +170,7 @@ class SimulationPage(QWidget):
         self._worker = None
         self._signals_cleaned = False
         self._ss = SimulationService()
-        # 外部日志出口（工作区终端），由 ProcessPage 注入
+        # 外部日志出口（工作区终端），由 WorkspacePage 注入
         self._log_sink = None
         # 主动作状态（文案/可用性），由工作区底部导航行读取展示
         self._action_label = "▶ 启动仿真"
@@ -351,7 +351,7 @@ class SimulationPage(QWidget):
             self._running = False
             return
 
-        # 完成判定与 ProcessPage._is_sim_done 同源，以 DB 项目状态为准；
+        # 完成判定与 WorkspacePage._is_sim_done 同源，以 DB 项目状态为准；
         # 致命失败后可能残留轮次但状态非 completed，此时必须允许重新启动
         if history.status == "completed":
             self._bar.setValue(100)

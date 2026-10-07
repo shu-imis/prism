@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from ui.styles import SIDEBAR_W, sidebar_inactive_qss, stylesheet
 from ui.projects_page import ProjectsPage
-from ui.process_page import ProcessPage
+from ui.workspace_page import WorkspacePage
 from ui.settings_page import SettingsPage
 from ui.title_bar import TitleBar
 
@@ -94,16 +94,16 @@ class MainWindow(QMainWindow):
         # --- 内容区 ---
         self._stack = QStackedWidget()
         self._projects = ProjectsPage()
-        self._process = ProcessPage()
+        self._workspace = WorkspacePage()
         self._settings = SettingsPage()
         self._stack.addWidget(self._projects)
-        self._stack.addWidget(self._process)
+        self._stack.addWidget(self._workspace)
         self._stack.addWidget(self._settings)
 
-        self._projects.new_project.connect(lambda: (self._process.reset(), self._go(1)))
-        self._projects.open_project.connect(lambda pid: (self._process.load_project(pid), self._go(1)))
+        self._projects.new_project.connect(lambda: (self._workspace.reset(), self._go(1)))
+        self._projects.open_project.connect(lambda pid: (self._workspace.load_project(pid), self._go(1)))
         self._projects.project_deleted.connect(self._on_project_deleted)
-        self._process.open_settings.connect(lambda: self._go(3))
+        self._workspace.open_settings.connect(lambda: self._go(3))
 
         body = QHBoxLayout()
         body.setSpacing(0)
@@ -133,18 +133,18 @@ class MainWindow(QMainWindow):
 
     def _on_project_deleted(self, pid: int):
         # 被删的正是工作区当前打开的项目：重置工作区，避免停留在失效项目的页面
-        if self._process.current_project_id == pid:
-            self._process.reset()
+        if self._workspace.current_project_id == pid:
+            self._workspace.reset()
             if self._stack.currentIndex() == 1:
                 self._go(0)
 
     def closeEvent(self, event):
         """窗口关闭前安全停止工作线程，避免 PySide6 QThread 析构崩溃。"""
-        self._process.stop_worker()
+        self._workspace.stop_worker()
         # 各页面运行中的 AI worker（LLM 调用最长 180s）：断开信号并把引用挂到
         # 模块级列表，防止 GC 析构运行中的 QThread；不 wait() 阻塞关窗，
         # 进程自然退出，请求跑完即被回收
-        workers = list(self._process.iter_ai_workers())
+        workers = list(self._workspace.iter_ai_workers())
         workers += self._settings.iter_ai_workers()
         for worker in workers:
             try:
