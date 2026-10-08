@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from config import app_config
 from core.agent import AGENT_TEMPLATES
 from core.agent_factory import AgentFactory
+from core.constants import STANCES
 from db.models import ProjectRepository, invalidate_simulation_results
 from llm.analysis import generate_agent_config
 from llm.config import build_llm_client
@@ -30,13 +31,6 @@ from ui.widgets import (
     SegmentedControl,
     Title,
 )
-
-STANCES = [
-    ("aggressive", "激进"),
-    ("cautious", "保守"),
-    ("cooperative", "协作"),
-    ("defensive", "防御"),
-]
 
 MAX_SEED_EVENTS = 3
 
@@ -74,7 +68,10 @@ class PersonaPage(QWidget):
         self._ai_btn.clicked.connect(self._ai_generate)
         header.addWidget(self._ai_btn)
         card.add_layout(header)
-        card.add(Caption("调整 7 个行为体的决策倾向、活跃度、影响力与角色画像，观察单条供应链的演化"))
+        card.add(Caption(
+            f"调整 {len(AGENT_TEMPLATES)} 个行为体的决策倾向、活跃度、影响力与角色画像，"
+            "观察单条供应链的演化"
+        ))
         self._il.addWidget(card)
 
         for tmpl in AGENT_TEMPLATES:
@@ -83,7 +80,7 @@ class PersonaPage(QWidget):
         # --- 种子事件 ---
         self._seed_card = Card()
         self._seed_card.add(Title("种子事件", 14))
-        self._seed_card.add(Caption("在指定周期向供应链注入外部干预（最多 3 条）"))
+        self._seed_card.add(Caption(f"在指定周期向供应链注入外部干预（最多 {MAX_SEED_EVENTS} 条）"))
         self._seed_layout = QVBoxLayout()
         self._seed_layout.setSpacing(PAD_SM)
         self._seed_card.add_layout(self._seed_layout)
@@ -264,6 +261,10 @@ class PersonaPage(QWidget):
         self._pid = None
         self.load_project(None)
 
+    def save(self):
+        """公开保存入口（供工作区导航按钮调用）。"""
+        self._save()
+
     def _save(self):
         if not self._pid:
             return
@@ -292,6 +293,8 @@ class PersonaPage(QWidget):
         repo = ProjectRepository()
         project = repo.get_by_id(self._pid)
         if not project:
+            # 项目已在首页被删除：不静默吞掉，提示用户重新创建
+            self.log("项目已被删除，请回到首页重新创建或打开其他项目", is_error=True)
             return
         # update_scenario 为全量替换，先读旧 scenario 再合并写回
         scenario = dict(project.scenario)

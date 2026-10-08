@@ -6,7 +6,7 @@ from core.world_state import AgentSnapshot, KeyEvent, WorldState
 from llm.client import LLMClient, LLMVendor, VendorSettings
 import llm.analysis as llm_analysis
 from report.exporter import ReportExporter
-from report.generator import ReportGenerator, SimulationReport
+from report.generator import ReportGenerator, SimulationReport, recommend, recommendation_level
 from tests.helpers import make_json_client
 
 
@@ -47,7 +47,7 @@ class ReportingTests(unittest.TestCase):
             project_name="Prism",
             scenario_background="电子产品供应链推演",
         )
-        generator.add_simulation_result(rounds)
+        generator.set_simulation_result(rounds)
         report = generator.generate()
         markdown = ReportExporter.to_markdown(report, rounds)
 
@@ -82,7 +82,7 @@ class ReportingTests(unittest.TestCase):
                 },
             )
         ]
-        generator.add_simulation_result(rounds)
+        generator.set_simulation_result(rounds)
         report = generator.generate()
 
         markdown = ReportExporter.to_markdown(report, rounds)
@@ -108,7 +108,7 @@ class ReportingTests(unittest.TestCase):
                 },
             )
         ]
-        generator.add_simulation_result(rounds)
+        generator.set_simulation_result(rounds)
         report = generator.generate()
 
         markdown = ReportExporter.to_markdown(report, rounds)
@@ -116,10 +116,39 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("# 含 换行的项目 - 供应链演化仿真报告", markdown)
         self.assertIn("促销订单增长 需要补货。", markdown)
 
+    def test_generate_without_rounds_raises(self) -> None:
+        """0 轮时不伪造默认快照：generate 直接抛 ValueError。"""
+        generator = ReportGenerator("demo", "背景")
+        with self.assertRaises(ValueError):
+            generator.generate()
+
+        generator.set_simulation_result([])
+        with self.assertRaises(ValueError):
+            generator.generate()
+
+    def test_recommendation_level_matches_recommend_texts(self) -> None:
+        """recommend 三档文案经 recommendation_level 子串规则回查必须落在原分级。"""
+        healthy = recommend(
+            {key: 90.0 for key in ("成本控制", "交付稳定性", "库存健康度", "风险抵御", "协同效率", "可执行性")},
+            [],
+        )
+        self.assertEqual(recommendation_level(healthy), "ok")
+
+        middling = recommend(
+            {key: 65.0 for key in ("成本控制", "交付稳定性", "库存健康度", "风险抵御", "协同效率", "可执行性")},
+            ["成本指数超标，利润率承压"],
+        )
+        self.assertEqual(recommendation_level(middling), "warn")
+
+        poor = recommend({"成本控制": 10.0}, ["库存水平过低，存在断供风险"])
+        self.assertEqual(recommendation_level(poor), "risk")
+        # 分级规则与文案词表互为单一实现的两端：未知文案一律落入 risk
+        self.assertEqual(recommendation_level("随便一段结论"), "risk")
+
     def test_analyze_evolution_and_report_round_trip(self) -> None:
         """演化分析：LLM 叙述写入 report.ai_analysis，序列化往返保留；失败时抛异常供降级。"""
         generator = ReportGenerator("demo", "背景")
-        generator.add_simulation_result([
+        generator.set_simulation_result([
             WorldState(round=0, inventory_level=70, cost_index=50, service_level=0.85),
             WorldState(round=1, inventory_level=55, cost_index=62, service_level=0.7),
         ])

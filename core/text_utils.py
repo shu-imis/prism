@@ -33,9 +33,8 @@ def normalize_speech(text: str) -> str:
     text = re.sub(rf"(?<={_CJK_OR_CLOSE})\?", "？", text)
     text = re.sub(rf"(?<={_CJK_OR_CLOSE})!", "！", text)
     text = re.sub(rf"(?<={_CJK_OR_CLOSE}):(?!\d)", "：", text)
-    # 结尾三连点归一为中文省略号（…已在终止标点中），避免 "..." 被改成 "..。" 畸形
-    if text.endswith("..."):
-        text = text[:-3] + "…"
+    # 结尾 2 个及以上连续句点归一为中文省略号（…本身属终止标点，无需补句号）
+    text = re.sub(r"\.{2,}$", "…", text)
     if text.endswith("."):
         text = text[:-1] + "。"
     if text[-1] not in _TERMINAL_PUNCT and text[-1] not in _CLOSING_PUNCT:

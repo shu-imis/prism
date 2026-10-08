@@ -1,6 +1,6 @@
 """Prism 设计系统 — Sigma 风格桌面应用
 
-色彩与 QSS 生成器。
+色彩、尺寸常量与 QSS 生成器；文末 STATUS_LABELS / STATUS_COLORS 为项目状态词表。
 """
 # ============================================================
 # 色彩 — Sigma 风格
@@ -157,6 +157,7 @@ QMainWindow {{ background: {BG_PAGE}; }}
     color: {TEXT_PRIMARY};
 }}
 #sidebar QPushButton:checked {{
+    /* 激活窗口的选中底色，比失焦态 BG_INACTIVE_CHECKED 略深一档以区分焦点层次 */
     background: #E8E8E8;
     color: {TEXT_PRIMARY};
     font-weight: 600;

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from core.action_feed import ActionFeed, ActionRecord
+from core.agent import Agent
 from core.agent_factory import AgentFactory
 from core.document_importer import chunk_text, import_documents
 from core.events import EventDetector
@@ -99,6 +100,7 @@ class CoreModuleTests(unittest.TestCase):
             ("see https://a.b/c, ok.", "see https://a.b/c, ok."),  # 非 CJK 语境不误伤
             ("", ""),
             ("不确定...", "不确定…"),  # 结尾三连点归一为中文省略号，不再补句号
+            ("不确定..", "不确定…"),  # 结尾两连点同样归一
             ("库存不足...需要观察", "库存不足...需要观察。"),  # 句中三连点保留，句末补句号
             ("他说「好」,然后走了", "他说「好」，然后走了。"),  # 闭引号后的半角逗号转全角
             ("风险可控」", "风险可控」"),  # 闭符号结尾不补句号
@@ -247,17 +249,31 @@ class CoreModuleTests(unittest.TestCase):
         self.assertIs(result, agents)
         overridden = next(agent for agent in agents if agent.id == 4)
         self.assertEqual(overridden.decision_stance, "cautious")
-        self.assertEqual(overridden.base_stance, "cautious")
         self.assertEqual(overridden.activity, 0.1)
         self.assertEqual(overridden.profile, "自定义画像")
 
         untouched = next(agent for agent in agents if agent.id == 1)
         self.assertEqual(untouched.decision_stance, template["decision_stance"])
-        self.assertEqual(untouched.base_stance, template["decision_stance"])
         self.assertEqual(untouched.activity, template["activity"])
         self.assertEqual(untouched.profile, template["profile"])
 
         self.assertIs(AgentFactory.apply_overrides(agents, None), agents)
+
+    def test_agent_from_dict_tolerates_legacy_base_stance(self) -> None:
+        """旧检查点中的 base_stance 键被忽略，序列化只写当前键集。"""
+        agent = AgentFactory.create_all()[0]
+        legacy = agent.to_dict()
+        legacy["base_stance"] = "cautious"
+
+        restored = Agent.from_dict(legacy)
+
+        self.assertEqual(restored.decision_stance, agent.decision_stance)
+        self.assertNotIn("base_stance", restored.to_dict())
+
+    def test_event_detector_from_dict_tolerates_missing_keys(self) -> None:
+        """EventDetector.from_dict 缺键时取零值，不报错。"""
+        detector = EventDetector.from_dict({})
+        self.assertEqual(detector.to_dict()["supplier_delay_count"], 0)
 
 
 if __name__ == "__main__":

@@ -115,7 +115,7 @@ class SettingsPage(QWidget):
         adv.addWidget(self._max_retries)
         adv.addStretch()
         card.add_layout(adv)
-        card.add(Caption("思考型模型响应较慢，调用超时可适当调大请求超时。"))
+        card.add(Caption("思考型模型响应较慢，可适当调大该时长。"))
 
         br = QHBoxLayout()
         self._test_btn = GhostBtn("测试连接")
@@ -158,6 +158,8 @@ class SettingsPage(QWidget):
         scroll.setWidget(inner)
         layout.addWidget(scroll, 1)
 
+        self._wire_status_invalidation()
+
     # --- 配置读写 ---
 
     def _load(self):
@@ -197,9 +199,26 @@ class SettingsPage(QWidget):
     def _set_status(self, text: str, is_error: bool = False):
         self._status.setText(text)
         self._status.setStyleSheet(
-            f"color:{COLOR_RED if is_error else TEXT_MUTED};"
+            f"color:{COLOR_RED if is_error else COLOR_GREEN};"
         )
         self._status.setVisible(bool(text))
+
+    def _clear_status(self, *_args):
+        """字段内容变化后清掉旧状态提示：保存/测试结果只对当时的字段值有效。"""
+        self._set_status("")
+
+    def _wire_status_invalidation(self):
+        for field in (self._key, self._url, self._model):
+            field.textChanged.connect(self._clear_status)
+        for stepper in (
+            self._request_timeout,
+            self._max_retries,
+            self._sim_rounds,
+            self._decision_temperature,
+        ):
+            stepper._input.textChanged.connect(self._clear_status)
+            stepper._minus.clicked.connect(self._clear_status)
+            stepper._plus.clicked.connect(self._clear_status)
 
     def _on_save(self):
         self._save_current_vendor_state()

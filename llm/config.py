@@ -12,8 +12,8 @@ API Key 属于敏感信息，任何情况下都不明文落盘：
    （enc:v1: 前缀）——属本机绑定加密，安全级别低于钥匙串，但非明文；
 3. 连本机特征也取不到时仅在进程内存中生效，不落盘。
 
-启动时若发现 .env 中残留旧格式 Key（明文或 enc:v1: 密文）且钥匙串
-可用，会自动迁移进钥匙串并清空 .env。
+load_vendor_state() 读取厂商配置时若发现 .env 中残留旧格式 Key（明文
+或 enc:v1: 密文）且钥匙串可用，会幂等地迁移进钥匙串并清空 .env。
 """
 from __future__ import annotations
 
@@ -31,25 +31,17 @@ from config import DB_PATH, ROOT_DIR, app_config
 from llm.client import LLMClient, LLMError, LLMVendor, VendorSettings
 
 PRESETS = [
-    {"label": "Anthropic", "proto": "anthropic", "url": "https://api.anthropic.com", "model": "claude-fable-5"},
-    {"label": "DeepSeek", "proto": "openai", "url": "https://api.deepseek.com", "model": "deepseek-v4-pro"},
-    {"label": "Kimi", "proto": "openai", "url": "https://api.moonshot.cn/v1", "model": "kimi-k3"},
-    {"label": "OpenAI", "proto": "openai", "url": "https://api.openai.com/v1", "model": "gpt-5.6-sol"},
-    {"label": "通义千问", "proto": "openai", "url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen3.7-max"},
-    {"label": "智谱", "proto": "openai", "url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-5.2"},
-    {"label": "自定义", "proto": "openai", "url": "", "model": ""},
+    {"label": "Anthropic", "proto": "anthropic", "url": "https://api.anthropic.com", "model": "claude-fable-5", "env": "ANTHROPIC"},
+    {"label": "DeepSeek", "proto": "openai", "url": "https://api.deepseek.com", "model": "deepseek-v4-pro", "env": "DEEPSEEK"},
+    {"label": "Kimi", "proto": "openai", "url": "https://api.moonshot.cn/v1", "model": "kimi-k3", "env": "KIMI"},
+    {"label": "OpenAI", "proto": "openai", "url": "https://api.openai.com/v1", "model": "gpt-5.6-sol", "env": "OPENAI"},
+    {"label": "通义千问", "proto": "openai", "url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen3.7-max", "env": "QWEN"},
+    {"label": "智谱", "proto": "openai", "url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-5.2", "env": "ZHIPU"},
+    {"label": "自定义", "proto": "openai", "url": "", "model": "", "env": "CUSTOM"},
 ]
 
-# 厂商索引 → .env 环境变量前缀
-VENDOR_ENV_PREFIX = {
-    0: "ANTHROPIC",
-    1: "DEEPSEEK",
-    2: "KIMI",
-    3: "OPENAI",
-    4: "QWEN",
-    5: "ZHIPU",
-    6: "CUSTOM",
-}
+# 厂商索引 → .env 环境变量前缀（由 PRESETS 派生，索引即 PRESETS 下标）
+VENDOR_ENV_PREFIX = {idx: preset["env"] for idx, preset in enumerate(PRESETS)}
 
 # 当前生效厂商索引（.env 中的键名），Step1/2/4 的 AI 功能与仿真统一使用
 ACTIVE_VENDOR_ENV = "LLM_ACTIVE_VENDOR"
@@ -58,8 +50,13 @@ ACTIVE_VENDOR_ENV = "LLM_ACTIVE_VENDOR"
 _KEYRING_SERVICE = "Prism"
 
 
+@lru_cache(maxsize=1)
 def _get_keyring() -> Any | None:
-    """返回可用的 keyring 模块；未安装或无可用后端（CI/无桌面环境）返回 None。"""
+    """返回可用的 keyring 模块；未安装或无可用后端（CI/无桌面环境）返回 None。
+
+    进程内缓存：后端探测涉及模块导入与 IPC，调用方运行在 UI 线程；
+    后端可用性在进程生命周期内不变。
+    """
     try:
         import keyring
         from keyring.backends.fail import Keyring as FailKeyring
@@ -210,6 +207,7 @@ def _get_secret(name: str) -> str:
 def _set_secret(env_file: Path, name: str, value: str) -> bool:
     """写入密钥到系统钥匙串，并清除 .env / 环境变量中的残留（明文或密文）。
 
+    value 为空串时表示删除该密钥：删除钥匙串条目（条目不存在则忽略）。
     无可用钥匙串后端（或钥匙串写失败）时回退本机绑定加密写 .env，
     任何路径都不落盘明文。返回是否持久化成功。
     """
@@ -282,7 +280,9 @@ def persist_env_vars(
 ) -> bool:
     """持久化任意环境变量键值到 .env（并同步当前进程）。返回是否全部写入成功。"""
     env_file = _env_path(env_path)
-    return all(_persist_key(env_file, name, value) for name, value in mapping.items())
+    # 逐个尝试全部键：任一失败不阻断其余键的写入，聚合最终结果
+    results = [_persist_key(env_file, name, value) for name, value in mapping.items()]
+    return all(results)
 
 
 def persist_vendor_state(

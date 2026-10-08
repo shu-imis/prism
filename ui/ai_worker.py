@@ -18,7 +18,7 @@ class AIWorker(QThread):
         try:
             self.succeeded.emit(self._fn())
         except Exception as e:  # noqa: BLE001 - 统一降级为错误文案
-            self.failed.emit(str(e))
+            self.failed.emit(str(e) or type(e).__name__)  # 空消息时至少给出异常类型
 
 
 def run_ai_task(owner, fn, on_success, on_error):
@@ -29,7 +29,8 @@ def run_ai_task(owner, fn, on_success, on_error):
     线程结束后经 finished → deleteLater 自行回收。
     """
     worker = AIWorker(fn)
-    owner._ai_workers = getattr(owner, "_ai_workers", None) or []
+    if not hasattr(owner, "_ai_workers"):
+        owner._ai_workers = []
     owner._ai_workers.append(worker)
 
     def _cleanup(*_args):

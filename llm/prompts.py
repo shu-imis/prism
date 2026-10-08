@@ -4,7 +4,11 @@
 """
 from __future__ import annotations
 
+from core.agent import AGENT_TEMPLATES
 from core.constants import ACTION_TYPES, NODE_TYPES
+
+# 行为体数量从模板派生，prompt 文案不硬编码
+_AGENT_COUNT = str(len(AGENT_TEMPLATES))
 
 
 # ============================================================
@@ -37,11 +41,11 @@ _AGENT_RESPONSE_RAW = """你正在参与一场供应链决策推演仿真，你�
 {observation}
 
 互动规则（必须遵守）：
-1. 你的互动对象只有 7 个行为体。除你之外的是：{other_agents}。用户消息中的供应链节点（all_nodes / relevant_nodes）只是结构描述，不是行为体，不能作为回应对象。
+1. 你的互动对象只有 __AGENT_COUNT__ 个行为体。除你之外的是：{other_agents}。用户消息中的供应链节点（all_nodes / relevant_nodes）只是结构描述，不是行为体，不能作为回应对象。
 2. reaction_to 只能填上述行为体之一的完整名称，且只能填一个；「种子事件」是环境干预，不是行为体，不可回应。没有明确回应对象时填 none。
 3. 只做符合你角色职责的事（消费者表达购买与需求变化、监管机构合规监督，不做采购补货等运营操作）。
 4. 发言体现你的决策倾向与性格，避免与其他行为体雷同的套话，不要复述你上一轮已经说过的内容。
-5. response_summary 中禁止编造具体数量、单位或百分比（如"追加15单位""上调10%"），只用"小幅/适度/大幅"等定性表述。
+5. response_summary 中禁止编造具体数量、单位或百分比（如「追加15单位」「上调10%」），只用「小幅/适度/大幅」等定性表述。
 
 请以你的角色视角，对当前供应链状态做出响应。结合用户消息中的供应链场景、相关节点和知识上下文，并针对上面其他行为体的行动做出反应（支持、反对、跟随或反制；若没有与你相关的行动，则按自身状态独立判断）。返回 JSON 对象，不要输出额外说明。
 
@@ -61,7 +65,11 @@ _AGENT_RESPONSE_RAW = """你正在参与一场供应链决策推演仿真，你�
 """
 
 _ACTION_ENUM = "|".join(f"{k}({v})" for k, v in ACTION_TYPES.items())
-AGENT_RESPONSE_SYSTEM = _AGENT_RESPONSE_RAW.replace("__ACTION_ENUM__", _ACTION_ENUM)
+AGENT_RESPONSE_SYSTEM = (
+    _AGENT_RESPONSE_RAW
+    .replace("__ACTION_ENUM__", _ACTION_ENUM)
+    .replace("__AGENT_COUNT__", _AGENT_COUNT)
+)
 
 
 # ============================================================
@@ -109,7 +117,7 @@ SCENARIO_EXTRACTION_SYSTEM = _SCENARIO_EXTRACTION_RAW.replace("__NODE_ENUM__", _
 # 行为体配置生成 Prompt（Step2：AI 生成性格与种子事件）
 # ============================================================
 
-PERSONA_GENERATION_SYSTEM = """你是一位供应链多行为体推演设计专家。用户会给你供应链场景与 7 个固定行为体模板。请结合场景，为每个行为体生成性格配置，并设计种子事件。
+_PERSONA_GENERATION_RAW = """你是一位供应链多行为体推演设计专家。用户会给你供应链场景与 __AGENT_COUNT__ 个固定行为体模板。请结合场景，为每个行为体生成性格配置，并设计种子事件。
 
 要求：
 - agents_config：以行为体 id（字符串）为键，每个行为体包含：
@@ -118,7 +126,7 @@ PERSONA_GENERATION_SYSTEM = """你是一位供应链多行为体推演设计专�
   - influence：影响力权重，0.5~3.0 的小数；核心制造商、消费者、监管机构通常较高。
   - profile：角色画像（第一人称「你是…」），结合本场景的行业与节点重写，60~120 字，保留该行为体的核心关切与压力来源。
 - seed_events：0~3 条外部干预事件，每条含 content（事件描述，贴合场景，如「主要港口罢工导致物流中断」）与 cycle（注入周期，1 到仿真总轮次的整数）。
-- 所有 7 个行为体都必须出现在 agents_config 中。
+- 所有 __AGENT_COUNT__ 个行为体都必须出现在 agents_config 中。
 
 只输出 JSON 对象，不要输出额外说明：
 {
@@ -130,6 +138,7 @@ PERSONA_GENERATION_SYSTEM = """你是一位供应链多行为体推演设计专�
   ]
 }
 """
+PERSONA_GENERATION_SYSTEM = _PERSONA_GENERATION_RAW.replace("__AGENT_COUNT__", _AGENT_COUNT)
 
 
 # ============================================================

@@ -17,7 +17,6 @@ class Agent:
     name: str
     role: str                              # 角色标签
     decision_stance: str                   # 决策倾向：aggressive/cautious/cooperative/defensive
-    base_stance: str                       # 初始倾向（配置原值，不随仿真推进变化）
     influence: float                       # 单次决策对世界状态的影响力权重
     activity: float                        # 每轮被激活的概率（0~1）
     pressure: float = 0.0                  # 当前压力水平（0~1）
@@ -31,7 +30,6 @@ class Agent:
             "name": self.name,
             "role": self.role,
             "decision_stance": self.decision_stance,
-            "base_stance": self.base_stance,
             "influence": self.influence,
             "activity": self.activity,
             "pressure": self.pressure,
@@ -42,12 +40,12 @@ class Agent:
 
     @classmethod
     def from_dict(cls, data: dict) -> Agent:
+        # 旧检查点可能含 base_stance 键，忽略即可
         return cls(
             id=data["id"],
             name=data["name"],
             role=data["role"],
             decision_stance=data["decision_stance"],
-            base_stance=data["base_stance"],
             influence=data["influence"],
             activity=data["activity"],
             pressure=data.get("pressure", 0.0),
@@ -61,6 +59,9 @@ class Agent:
 # 7 个固定供应链行为体模板
 # ============================================================
 
+# 模板默认活跃周期：全部 12 轮（app_config.sim.max_rounds 默认上限）
+_DEFAULT_ACTIVE_CYCLES = tuple(range(1, 13))
+
 AGENT_TEMPLATES: list[dict] = [
     {
         "id": 1,
@@ -69,7 +70,7 @@ AGENT_TEMPLATES: list[dict] = [
         "decision_stance": "cautious",
         "influence": 1.0,
         "activity": 0.5,
-        "active_cycles": list(range(1, 13)),
+        "active_cycles": list(_DEFAULT_ACTIVE_CYCLES),
         "profile": (
             "你是一家原材料供应商。你关注原材料价格波动、订单稳定性和下游需求变化。"
             "你的决策倾向偏保守（cautious），倾向于维持安全库存，在需求不确定时会减少供应承诺。"
@@ -83,7 +84,7 @@ AGENT_TEMPLATES: list[dict] = [
         "decision_stance": "cooperative",
         "influence": 2.5,
         "activity": 0.9,
-        "active_cycles": list(range(1, 13)),
+        "active_cycles": list(_DEFAULT_ACTIVE_CYCLES),
         "profile": (
             "你是一家核心制造商，处于供应链的中心位置。你负责协调上下游，管理产能与排产决策。"
             "你的决策倾向偏协作（cooperative），倾向于与上下游协商解决问题。"
@@ -97,7 +98,7 @@ AGENT_TEMPLATES: list[dict] = [
         "decision_stance": "cautious",
         "influence": 1.5,
         "activity": 0.6,
-        "active_cycles": list(range(1, 13)),
+        "active_cycles": list(_DEFAULT_ACTIVE_CYCLES),
         "profile": (
             "你是一家区域分销商，承担库存缓冲角色。你受需求波动冲击较大。"
             "你的决策倾向偏保守（cautious），倾向于根据下游订单调整库存策略。"
@@ -111,7 +112,7 @@ AGENT_TEMPLATES: list[dict] = [
         "decision_stance": "aggressive",
         "influence": 1.8,
         "activity": 0.8,
-        "active_cycles": list(range(1, 13)),
+        "active_cycles": list(_DEFAULT_ACTIVE_CYCLES),
         "profile": (
             "你是一家终端零售商，直面消费者。你对价格和库存最敏感。"
             "你的决策倾向偏激进（aggressive），倾向于通过促销或降价维持市场份额。"
@@ -125,7 +126,7 @@ AGENT_TEMPLATES: list[dict] = [
         "decision_stance": "cooperative",
         "influence": 1.2,
         "activity": 0.5,
-        "active_cycles": list(range(1, 13)),
+        "active_cycles": list(_DEFAULT_ACTIVE_CYCLES),
         "profile": (
             "你是一家第三方物流服务商。运输时效与成本是你关注的关键变量。"
             "你的决策倾向偏协作（cooperative），倾向于根据运力情况调整服务承诺。"
@@ -139,7 +140,7 @@ AGENT_TEMPLATES: list[dict] = [
         "decision_stance": "aggressive",
         "influence": 2.0,
         "activity": 0.7,
-        "active_cycles": list(range(1, 13)),
+        "active_cycles": list(_DEFAULT_ACTIVE_CYCLES),
         "profile": (
             "你代表终端消费者群体。你的购买行为受价格与服务水平直接影响。"
             "你的决策倾向偏激进（aggressive），对价格和服务变化反应迅速。"
@@ -154,7 +155,7 @@ AGENT_TEMPLATES: list[dict] = [
         "decision_stance": "defensive",
         "influence": 2.0,
         "activity": 0.2,
-        "active_cycles": list(range(1, 13)),
+        "active_cycles": list(_DEFAULT_ACTIVE_CYCLES),
         "profile": (
             "你代表政府监管机构。你仅对合规与安全事件做出反应。"
             "你的决策倾向偏防御（defensive），关注全链合规性和安全风险。"

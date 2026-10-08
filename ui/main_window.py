@@ -108,8 +108,9 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._process)
         self._stack.addWidget(self._settings)
 
-        self._projects.new_project.connect(lambda: (self._process.reset(), self._go(2)))
-        self._projects.open_project.connect(lambda pid: (self._process.load_project(pid), self._go(2)))
+        self._projects.new_project.connect(lambda: (self._process.reset(), self._go(1)))
+        self._projects.open_project.connect(lambda pid: (self._process.load_project(pid), self._go(1)))
+        self._projects.project_deleted.connect(self._on_project_deleted)
         self._process.open_settings.connect(lambda: self._go(3))
 
         body = QHBoxLayout()
@@ -155,22 +156,29 @@ class MainWindow(QMainWindow):
         for i, btn in self._btns.items():
             btn.setChecked(i == idx)
 
+    def _on_project_deleted(self, pid: int):
+        # 被删的正是工作区当前打开的项目：重置工作区，避免停留在失效项目的页面
+        if self._process._pid == pid:
+            self._process.reset()
+            if self._stack.currentIndex() == 1:
+                self._go(0)
+
     def closeEvent(self, event):
         """窗口关闭前安全停止工作线程，避免 PySide6 QThread 析构崩溃。"""
         self._process.stop_worker()
         # 各页面运行中的 AI worker（LLM 调用最长 180s）：断开信号并把引用挂到
         # 模块级列表，防止 GC 析构运行中的 QThread；不 wait() 阻塞关窗，
         # 进程自然退出，请求跑完即被回收
-        for page in (self._process._ep, self._process._sp, self._process._rp, self._settings):
-            workers = getattr(page, "_ai_workers", None) or []
-            for worker in workers:
-                try:
-                    worker.succeeded.disconnect()
-                    worker.failed.disconnect()
-                except (RuntimeError, TypeError):
-                    pass
-                _orphaned_ai_workers.append(worker)
-            workers.clear()
+        workers = list(self._process.iter_ai_workers())
+        if hasattr(self._settings, "_ai_workers"):
+            workers += self._settings._ai_workers
+        for worker in workers:
+            try:
+                worker.succeeded.disconnect()
+                worker.failed.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            _orphaned_ai_workers.append(worker)
         super().closeEvent(event)
 
     def _center(self):

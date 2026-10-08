@@ -82,9 +82,9 @@ class EventDetector:
     def from_dict(cls, data: dict) -> EventDetector:
         """从检查点恢复连续计数。"""
         detector = cls()
-        detector._supplier_delay_count = int(data["supplier_delay_count"])
-        detector._regulator_risk_count = int(data["regulator_risk_count"])
-        detector._overflow_cooldown = int(data["overflow_cooldown"])
+        detector._supplier_delay_count = int(data.get("supplier_delay_count", 0))
+        detector._regulator_risk_count = int(data.get("regulator_risk_count", 0))
+        detector._overflow_cooldown = int(data.get("overflow_cooldown", 0))
         return detector
 
     def detect(

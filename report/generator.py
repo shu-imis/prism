@@ -87,8 +87,9 @@ class SimulationReport:
             risks=list(data.get("risks", [])),
             ai_analysis=dict(data.get("ai_analysis", {}) or {}),
         )
-        if data.get("generated_at"):
-            report.generated_at = str(data["generated_at"])
+        generated_at = data.get("generated_at")
+        if generated_at:
+            report.generated_at = str(generated_at)
         return report
 
 
@@ -100,16 +101,18 @@ class ReportGenerator:
         self.scenario_background = scenario_background
         self._rounds: list[WorldState] = []
 
-    def add_simulation_result(self, rounds: list[WorldState]) -> None:
-        """设置单世界仿真的轮次数据。"""
+    def set_simulation_result(self, rounds: list[WorldState]) -> None:
+        """设置单世界仿真的轮次数据（覆盖式，generate 前调用一次）。"""
         self._rounds = list(rounds or [])
 
     def generate(self) -> SimulationReport:
-        """生成单世界演化评估报告。"""
+        """生成单世界演化评估报告；无轮次数据时抛 ValueError。"""
 
-        normalized = self._rounds or [WorldState()]
-        first = normalized[0]
-        final = normalized[-1]
+        if not self._rounds:
+            raise ValueError("没有仿真轮次数据，无法生成报告。")
+        rounds = self._rounds
+        first = rounds[0]
+        final = rounds[-1]
         inventory_delta = final.inventory_level - first.inventory_level
         cost_delta = final.cost_index - first.cost_index
         delay_delta = final.delivery_delay - first.delivery_delay
@@ -117,7 +120,7 @@ class ReportGenerator:
         margin_delta = final.profit_margin - first.profit_margin
         key_events = [
             event.description
-            for round_state in normalized
+            for round_state in rounds
             for event in round_state.key_events
         ]
         scores = score_evolution(final, inventory_delta, cost_delta, delay_delta, service_delta, margin_delta)
@@ -139,7 +142,7 @@ class ReportGenerator:
             scores=scores,
             key_events=key_events,
             evolution_summary=build_evolution_summary(
-                normalized, final, inventory_delta, cost_delta, service_delta, margin_delta, key_events
+                rounds, final, inventory_delta, cost_delta, service_delta, margin_delta, key_events
             ),
             recommendation=recommend(scores, risks),
             risks=risks,
@@ -189,13 +192,39 @@ def detect_risks(
     return risks
 
 
+# 结论分级 → 标准文案；recommend 按评分选级，文案词表只维护这一份
+_RECOMMENDATION_TEXTS = {
+    "ok": "演化趋势健康，可参照执行",
+    "warn": "整体可控，需针对风险点调整",
+    "risk": "演化结果不理想，建议调整行为体配置或种子事件",
+}
+
+
+def recommendation_level(text: str) -> str:
+    """结论/建议文案的语义分级：ok / warn / risk。
+
+    文案子串判定规则的单一实现，供结果页上色等消费方复用；
+    与 _RECOMMENDATION_TEXTS 的标准文案保持一致（测试覆盖）。
+    """
+    if "健康" in text or "可参照" in text:
+        return "ok"
+    if "可控" in text:
+        return "warn"
+    return "risk"
+
+
 def recommend(scores: dict[str, float], risks: list[str]) -> str:
     average = sum(scores.values()) / max(len(scores), 1)
     if average >= 75 and not risks:
-        return "演化趋势健康，可参照执行"
-    if average >= 60:
-        return "整体可控，需针对风险点调整"
-    return "演化结果不理想，建议调整行为体配置或种子事件"
+        level = "ok"
+    elif average >= 60:
+        level = "warn"
+    else:
+        level = "risk"
+    # 文案经 recommendation_level 的子串规则筛选，词表与规则漂移时抛 StopIteration
+    return next(
+        text for text in _RECOMMENDATION_TEXTS.values() if recommendation_level(text) == level
+    )
 
 
 def build_evolution_summary(

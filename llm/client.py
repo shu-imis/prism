@@ -44,7 +44,8 @@ class LLMError(RuntimeError):
         self.failures = failures or []
 
 
-# SDK 客户端实例缓存：以 (vendor, api_key, base_url) 为键复用连接池。
+# SDK 客户端实例缓存：以 (vendor, api_key, base_url, timeout) 为键复用连接池
+# （timeout 经 SDK 构造参数生效，必须参与键，否则不同超时会复用同一实例）。
 # dict 读写对并发足够安全（最坏情况是多建一个实例）。
 _client_cache: dict = {}
 
@@ -53,6 +54,10 @@ def _get_sdk_client(key: tuple, factory: Callable[[], Any]) -> Any:
     if key not in _client_cache:
         _client_cache[key] = factory()
     return _client_cache[key]
+
+
+# Anthropic 单厂商构造与 from_env 共用的默认模型
+_DEFAULT_ANTHROPIC_MODEL = "claude-fable-5"
 
 
 class LLMClient:
@@ -72,12 +77,20 @@ class LLMClient:
     ):
         self.vendors = list(vendors or [])
         if not self.vendors:
+            vendor_kind = vendor or LLMVendor.OPENAI
+            # 各厂商的默认模型/接入点取各自的环境变量，互不混用
+            if vendor_kind == LLMVendor.ANTHROPIC:
+                default_model = os.getenv("ANTHROPIC_MODEL", _DEFAULT_ANTHROPIC_MODEL)
+                default_base_url = os.getenv("ANTHROPIC_BASE_URL")
+            else:
+                default_model = app_config.llm.default_model
+                default_base_url = os.getenv("OPENAI_BASE_URL")
             self.vendors = [
                 VendorSettings(
-                    vendor=vendor or LLMVendor.OPENAI,
-                    model=model or app_config.llm.default_model,
+                    vendor=vendor_kind,
+                    model=model or default_model,
                     api_key=api_key,
-                    base_url=os.getenv("OPENAI_BASE_URL"),
+                    base_url=default_base_url,
                 )
             ]
         self.temperature = app_config.llm.temperature if temperature is None else temperature
@@ -117,7 +130,7 @@ class LLMClient:
                 vendors.append(
                     VendorSettings(
                         LLMVendor.ANTHROPIC,
-                        os.getenv("ANTHROPIC_MODEL", "claude-fable-5"),
+                        os.getenv("ANTHROPIC_MODEL", _DEFAULT_ANTHROPIC_MODEL),
                         ant_key,
                     )
                 )
@@ -165,16 +178,19 @@ class LLMClient:
                     if self._transport:
                         return self._transport(vendor, messages, options)
                     text, truncated = self._call_sdk(vendor, messages, options)
-                    # 响应被 max_tokens 截断：放大到 8192 重试一次（仅一次，不走 max_retries 循环）
+                    # 响应被 max_tokens 截断：放大到 8192 重试一次（仅一次，不走 max_retries 循环）。
+                    # 放大额度只作用于这一次调用，不回流到后续 attempt / 后续厂商
                     if truncated and options["max_tokens"] < 8192:
-                        options = {**options, "max_tokens": 8192}
-                        text, _ = self._call_sdk(vendor, messages, options)
+                        text, _ = self._call_sdk(vendor, messages, {**options, "max_tokens": 8192})
                     return text
                 except Exception as exc:  # noqa: BLE001 - 第三方 SDK 错误类型不统一
                     failures.append(f"{vendor.vendor.value} attempt {attempt + 1}: {exc}")
                     # 错误分类（OpenAI/Anthropic SDK 的 APIStatusError 均带 status_code）：
-                    # 4xx 永久性错误重试无意义，直接 break 切换下一个厂商
+                    # 4xx 永久性错误重试无意义，直接 break 切换下一个厂商；
+                    # SDK 未安装（RuntimeError 包装 ImportError）同为永久性错误
                     if getattr(exc, "status_code", None) in (400, 401, 403, 404, 422):
+                        break
+                    if isinstance(exc, RuntimeError) and isinstance(exc.__cause__, ImportError):
                         break
                     if attempt < self.max_retries:
                         time.sleep(self._retry_delay(exc, attempt))
@@ -258,7 +274,10 @@ class LLMClient:
         if options.get("json_mode"):
             request["response_format"] = {"type": "json_object"}
 
-        client = _get_sdk_client(("openai", vendor.api_key, vendor.base_url), lambda: OpenAI(**kwargs))
+        client = _get_sdk_client(
+            ("openai", vendor.api_key, vendor.base_url, options["timeout"]),
+            lambda: OpenAI(**kwargs),
+        )
         response = client.chat.completions.create(**request)
         choice = response.choices[0]
         return strip_model_noise(choice.message.content or ""), choice.finish_reason == "length"
@@ -274,11 +293,12 @@ class LLMClient:
         except ImportError as exc:
             raise RuntimeError("anthropic 包未安装。运行: pip install anthropic") from exc
 
-        system_prompt = ""
+        # 多条 system 消息合并为一条（Anthropic 的 system 是独立参数）
+        system_parts: list[str] = []
         user_messages: list[dict[str, str]] = []
         for message in messages:
             if message.get("role") == "system":
-                system_prompt = message.get("content", "")
+                system_parts.append(message.get("content", ""))
             else:
                 user_messages.append(
                     {
@@ -286,16 +306,19 @@ class LLMClient:
                         "content": message.get("content", ""),
                     }
                 )
+        system_prompt = "\n".join(part for part in system_parts if part)
         if options.get("json_mode"):
-            # Anthropic 无 response_format：system 约束 + assistant 预填 "{" 强制 JSON
-            system_prompt = (system_prompt + "\n只输出一个 JSON 对象，不要输出其他内容").strip()
+            # Anthropic 无 response_format：prompt 已含 JSON 约束，assistant 预填 "{" 强制 JSON
             user_messages.append({"role": "assistant", "content": "{"})
 
         kwargs: dict[str, Any] = {"api_key": vendor.api_key, "timeout": options["timeout"]}
         if vendor.base_url:
             kwargs["base_url"] = vendor.base_url
 
-        client = _get_sdk_client(("anthropic", vendor.api_key, vendor.base_url), lambda: Anthropic(**kwargs))
+        client = _get_sdk_client(
+            ("anthropic", vendor.api_key, vendor.base_url, options["timeout"]),
+            lambda: Anthropic(**kwargs),
+        )
         response = client.messages.create(
             model=vendor.model,
             system=system_prompt,
@@ -303,7 +326,11 @@ class LLMClient:
             temperature=options["temperature"],
             max_tokens=options["max_tokens"],
         )
-        text = "\n".join(getattr(block, "text", "") for block in response.content)
+        text = "\n".join(
+            block_text
+            for block in response.content
+            if (block_text := getattr(block, "text", ""))
+        )
         if options.get("json_mode"):
             text = "{" + text  # 拼回预填的开括号
         return strip_model_noise(text), response.stop_reason == "max_tokens"

@@ -148,7 +148,10 @@ class Divider(QFrame):
     def __init__(self, vertical=False, parent=None):
         super().__init__(parent)
         self.setFrameShape(QFrame.VLine if vertical else QFrame.HLine)
-        self.setFixedWidth(1) if vertical else self.setFixedHeight(1)
+        if vertical:
+            self.setFixedWidth(1)
+        else:
+            self.setFixedHeight(1)
         self.setStyleSheet(f"background: {BORDER}; border: none;")
 
 
@@ -322,6 +325,7 @@ class TipLabel(QLabel):
     )
     _popup = None  # 当前打开的浮层（QLabel）
     _owner = None  # 浮层所属的 TipLabel
+    _filter_installed = False  # 全局解散过滤器只安装一次
 
     def __init__(self, text="", tip="", parent=None):
         super().__init__(text, parent)
@@ -388,8 +392,9 @@ class TipLabel(QLabel):
         cls._popup = popup
         cls._owner = owner
         app = QApplication.instance()
-        if app is not None:
+        if app is not None and not cls._filter_installed:
             app.installEventFilter(_TIP_DISMISS_FILTER)
+            cls._filter_installed = True
 
     @classmethod
     def hide_tip(cls) -> None:
@@ -581,4 +586,6 @@ def clear_layout(layout: QLayout) -> None:
             widget.setVisible(False)
             widget.deleteLater()
         elif item.layout() is not None:
-            clear_layout(item.layout())
+            sub = item.layout()
+            clear_layout(sub)
+            sub.deleteLater()  # 子布局本身也是对象，清空子项后一并销毁

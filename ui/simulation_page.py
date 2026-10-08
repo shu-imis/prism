@@ -1,5 +1,8 @@
 """仿真运行"""
 
+import html
+import logging
+
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -13,8 +16,10 @@ from PySide6.QtWidgets import (
 
 from config import app_config, DB_PATH
 from core.agent_factory import AgentFactory
+from core.constants import METRICS
 from core.scenario_parser import Scenario
 from core.simulation_engine import SimulationEngine, SimulationRecoverableError
+from core.text_utils import normalize_speech
 from db.database import Database
 from db.models import (
     CheckpointRepository,
@@ -24,10 +29,9 @@ from db.models import (
     SimulationRoundRepository,
 )
 from llm.analysis import analyze_evolution
-from llm.config import active_vendor_label, build_llm_client
+from llm.config import active_vendor_label, build_llm_client, get_active_vendor_settings
 from report.generator import ReportGenerator
 from ui.styles import *
-from core.text_utils import normalize_speech
 from ui.widgets import (
     Caption,
     Card,
@@ -37,6 +41,8 @@ from ui.widgets import (
     SecondaryBtn,
     Title,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 class SimWorker(QThread):
@@ -91,6 +97,10 @@ class SimWorker(QThread):
         if self._engine is not None:
             self._engine.abort()
 
+    def is_paused(self) -> bool:
+        """是否处于暂停态（供页面查询，避免直接读私有字段）。"""
+        return self._paused
+
     def _relay_round(self, state, messages):
         """转发引擎轮次回调：暂停期间只缓存最新一轮，恢复后由 resume() 补发。"""
         payload = {
@@ -109,7 +119,15 @@ class SimWorker(QThread):
             self.round_done.emit(payload)
 
     def run(self):
+        db = None
         try:
+            # 引擎引用先行暴露：主线程的 cancel()/pause() 可能早于 DB 读取到达，
+            # 否则竞态窗口内的取消会被丢弃
+            engine = SimulationEngine(self.llm)
+            self._engine = engine
+            if self._cancelled:
+                engine.abort()
+
             db = Database(DB_PATH)
             proj = ProjectRepository(db).get_by_id(self.pid)
             scenario_dict = proj.scenario if proj else {}
@@ -126,8 +144,6 @@ class SimWorker(QThread):
             AgentFactory.apply_overrides(agents, scenario_dict.get("agents_config"))
             seed_events = scenario_dict.get("seed_events", [])
 
-            engine = SimulationEngine(self.llm)
-            self._engine = engine
             engine.configure(
                 agents, sc,
                 seed_events=seed_events,
@@ -152,13 +168,14 @@ class SimWorker(QThread):
                 proj.name if proj else "",
                 sc.background,
             )
-            gen.add_simulation_result(results)
+            gen.set_simulation_result(results)
             report = gen.generate()
             # Step4 全链路 AI：生成叙述式综合分析；失败则降级为纯公式报告
+            # （ai_analysis 留空，Step4 页面可手动重新生成）
             try:
                 report.ai_analysis = analyze_evolution(self.llm, report, results)
-            except Exception:
-                pass
+            except Exception as e:
+                _logger.warning("AI 综合分析失败，报告降级为纯公式结果：%s", e)
 
             self.succeeded.emit(self.pid, report, results)
         except SimulationRecoverableError as e:
@@ -167,11 +184,17 @@ class SimWorker(QThread):
             # 致命错误：清除检查点，防止反复恢复
             if self.pid:
                 try:
-                    db = Database(DB_PATH)
-                    CheckpointRepository(db).delete_for_project(self.pid)
+                    cleanup_db = Database(DB_PATH)
+                    try:
+                        CheckpointRepository(cleanup_db).delete_for_project(self.pid)
+                    finally:
+                        cleanup_db.close()
                 except Exception:
                     pass
             self.failed.emit(str(e))
+        finally:
+            if db is not None:
+                db.close()
         # run() 返回后 QThread 自动发射 finished(void) 信号，由主线程的
         # _on_worker_finished 槽断开信号连接；对象在下一次 _dispose_worker 时回收。
 
@@ -187,6 +210,8 @@ class SimulationPage(QWidget):
         self._running = False
         self._worker = None
         self._signals_cleaned = False
+        # 外部日志出口（工作区终端），由 ProcessPage 注入；页面自身日志始终保留
+        self._log_sink = None
         self._build()
 
     def _build(self):
@@ -219,7 +244,7 @@ class SimulationPage(QWidget):
         mr = QHBoxLayout()
         mr.setSpacing(PAD_SM)
         self._mv = {}
-        for lb in ["库存", "成本", "服务水平", "利润率", "交付延迟"]:
+        for lb in METRICS.values():
             c = Card(padding=PAD_SM)
             c.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             v = QLabel("—")
@@ -272,19 +297,27 @@ class SimulationPage(QWidget):
         super().showEvent(event)
 
     def _refresh_llm_caption(self):
-        if build_llm_client(max_retries=1) is None:
+        # 轻量判断：只查生效厂商是否配置了 Key，不构造完整 LLMClient
+        if get_active_vendor_settings() is None:
             self._llm_caption.setText(
                 "尚未配置 LLM API Key，请到左侧「设置」页完成配置后再启动仿真"
             )
         else:
             self._llm_caption.setText(f"当前 AI 配置：{active_vendor_label()}（在「设置」页修改）")
 
+    def set_log_sink(self, sink):
+        """注入外部日志出口（工作区终端）。"""
+        self._log_sink = sink
+
     def log(self, text: str, is_error: bool = False):
-        """向日志区追加一行，错误信息以红色显示。"""
+        """向日志区追加一行（内容经 HTML 转义），错误红色显示，并转发外部出口。"""
+        escaped = html.escape(text)
         if is_error:
-            self._log.append(f"<span style='color:#CC3333'>{text}</span>")
+            self._log.append(f"<span style='color:#CC3333'>{escaped}</span>")
         else:
-            self._log.append(text)
+            self._log.append(escaped)
+        if self._log_sink is not None:
+            self._log_sink(text, is_error)
 
     def load_project(self, pid):
         # 切换项目：取消旧仿真并断开其信号（不阻塞等待，引擎存检查点后自行退出）
@@ -397,7 +430,7 @@ class SimulationPage(QWidget):
             return
 
         # 暂停中的 worker 直接恢复，不重建线程、不作废进行中的轮次
-        if self._worker is not None and self._worker._paused and self._worker.isRunning():
+        if self._worker is not None and self._worker.is_paused() and self._worker.isRunning():
             self._worker.resume()
             self._running = True
             self._start.setText("⏸ 暂停")
@@ -462,9 +495,15 @@ class SimulationPage(QWidget):
             return
         try:
             w.cancel()
-            w.wait(35000)
+            finished = w.wait(35000)
         except RuntimeError:
-            pass  # C++ 对象已被 deleteLater 清理
+            # C++ 对象已被 deleteLater 清理
+            self._worker = None
+            return
+        if not finished:
+            # 等待超时说明引擎侧的 LLM 调用仍未返回、线程还活着：
+            # 不断开信号、不 deleteLater，留待 finished 信号链收尾
+            return
         if not self._signals_cleaned:
             self._disconnect_worker_signals(w)
         try:
@@ -553,22 +592,37 @@ class SimulationPage(QWidget):
         )
 
         for msg in messages:
-            agent_name = msg.get("agent_name", "未知行为体")
+            agent_name = html.escape(msg.get("agent_name", "未知行为体"))
             skipped = msg.get("metrics", {}).get("skipped", False)
             if skipped:
-                error = msg.get("metrics", {}).get("error_message", "")
-                self._log.append(f"    ×  {agent_name}：{error[:80]}")
+                error = html.escape(msg.get("metrics", {}).get("error_message", "")[:80])
+                self._log.append(f"    ×  {agent_name}：{error}")
             else:
-                content = normalize_speech(msg.get("content", ""))
+                content = normalize_speech(msg.get("speech", ""))
                 if content:
-                    action_type = msg.get("action_type", "maintain")
+                    action_type = html.escape(msg.get("action_type", "maintain"))
                     reaction_to = msg.get("reaction_to", "none")
-                    reaction = f" 回应@{reaction_to}" if reaction_to != "none" else ""
-                    self._log.append(f"    ↳  {agent_name}【{action_type}】{reaction}：{content}")
+                    reaction = f" 回应@{html.escape(reaction_to)}" if reaction_to != "none" else ""
+                    self._log.append(
+                        f"    ↳  {agent_name}【{action_type}】{reaction}：{html.escape(content)}"
+                    )
 
     def is_running(self) -> bool:
         """仿真是否正在运行（供工作区状态指示查询）。"""
         return self._running
+
+    def is_paused(self) -> bool:
+        """是否有暂停中、可恢复的仿真线程（供工作区按钮文案联动）。"""
+        return (
+            not self._running
+            and self._worker is not None
+            and self._worker.is_paused()
+            and self._worker.isRunning()
+        )
+
+    def toggle(self):
+        """公开切换入口（供工作区导航按钮调用）。"""
+        self._toggle()
 
     def stop_worker(self):
         """安全停止工作线程，供主窗口关闭时调用。

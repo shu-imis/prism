@@ -19,6 +19,7 @@ def build_action_episodes(rounds: list[WorldState]) -> list[dict]:
     def close(agent_id: int) -> None:
         episode = open_eps.pop(agent_id, None)
         if episode:
+            del episode["key"]  # 聚合用的内部键，不进入对外片段结构
             episodes.append(episode)
 
     for state in rounds:

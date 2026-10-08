@@ -118,6 +118,9 @@ class WorldState:
 
     @classmethod
     def from_dict(cls, data: dict) -> WorldState:
+        # 缺键策略：round 与四项核心指标（inventory/cost/delay）为必填，缺失即数据损坏直接报错；
+        # 其余为后续版本增补的可选键（simulated_hour/service_level/profit_margin/resilience_score
+        # 及各 delta、快照字段），缺失时取 dataclass 默认值以兼容旧存档
         simulated_hour = data.get("simulated_hour", 0)
         state = cls(
             round=data["round"],
