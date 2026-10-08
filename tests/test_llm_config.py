@@ -77,6 +77,33 @@ class LLMConfigTests(unittest.TestCase):
         self.assertEqual(observed[0].model, "deepseek-chat")
         self.assertEqual(observed[0].base_url, "https://api.deepseek.com")
 
+    def test_vendor_base_url_reaches_sdk_constructor(self) -> None:
+        """自定义 base_url 原样传入 SDK 构造：OpenAI 与 Anthropic 两条链都钉住。"""
+        openai_client = LLMClient(
+            vendors=[VendorSettings(LLMVendor.OPENAI, "m", "key", "https://gateway.example/v1")],
+            max_retries=0,
+        )
+        with (
+            mock.patch("llm.client._get_sdk_client", lambda key, factory: factory()),
+            mock.patch("openai.OpenAI") as openai_cls,
+        ):
+            openai_cls.return_value.chat.completions.create.return_value.choices = [
+                mock.Mock(message=mock.Mock(content="ok"), finish_reason="stop")
+            ]
+            self.assertEqual(openai_client.chat("s", "u"), "ok")
+            self.assertEqual(openai_cls.call_args.kwargs["base_url"], "https://gateway.example/v1")
+
+        anthropic_client = LLMClient(
+            vendors=[VendorSettings(LLMVendor.ANTHROPIC, "m", "key", "https://gateway.example/v1")],
+            max_retries=0,
+        )
+        with (
+            mock.patch("llm.client._get_sdk_client", lambda key, factory: factory()),
+            mock.patch("anthropic.Anthropic") as anthropic_cls,
+        ):
+            anthropic_client.chat("s", "u")
+            self.assertEqual(anthropic_cls.call_args.kwargs["base_url"], "https://gateway.example/v1")
+
     def test_parse_json_object_tries_all_balanced_candidates(self) -> None:
         """parse_json_object：逐个尝试平衡括号片段，跳过非 JSON 的前置片段。"""
         result = parse_json_object('说明 [见附录] {"a": 1}')

@@ -345,6 +345,7 @@ def build_llm_client(max_retries: int | None = None) -> LLMClient | None:
         return LLMClient.from_env(
             openai_key=_get_secret("OPENAI_API_KEY") or None,
             anthropic_key=_get_secret("ANTHROPIC_API_KEY") or None,
+            max_retries=retries,
         )
     except LLMError:
         return None

@@ -38,7 +38,7 @@ def _load_env() -> None:
             _data_dir = (Path(_appdata) if _appdata else Path.home() / "AppData" / "Roaming") / "Prism"
         else:
             _data_dir = Path.home() / ".local" / "share" / "Prism"
-        # 与 docstring 顺序一致：用户提供的 .env 优先，bundle 内置的仅作兜底
+        # 用户提供的 .env 优先，bundle 内置的仅作兜底
         candidates = [
             _data_dir / ".env",
             Path(sys.executable).resolve().parent / ".env",
@@ -109,7 +109,9 @@ def main():
     window = MainWindow()
     window.show()
 
-    sys.exit(app.exec())
+    # 解释器收尾会析构仍在运行的 QThread 并以 SIGABRT 中止进程；请求无法中断，
+    # 退出时直接结束进程，运行中的线程随进程一并回收
+    os._exit(app.exec())
 
 
 if __name__ == "__main__":

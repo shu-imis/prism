@@ -105,6 +105,7 @@ class LLMClient:
         prefer: LLMVendor = LLMVendor.OPENAI,
         openai_key: str | None = None,
         anthropic_key: str | None = None,
+        max_retries: int | None = None,
     ) -> "LLMClient":
         """从环境变量创建客户端，自动按可用 Key 配置 fallback 顺序。"""
 
@@ -132,11 +133,12 @@ class LLMClient:
                         LLMVendor.ANTHROPIC,
                         os.getenv("ANTHROPIC_MODEL", _DEFAULT_ANTHROPIC_MODEL),
                         ant_key,
+                        os.getenv("ANTHROPIC_BASE_URL"),
                     )
                 )
         if not vendors:
             raise LLMError("未找到可用的 LLM API Key，请设置 OPENAI_API_KEY 或 ANTHROPIC_API_KEY")
-        return cls(vendors=vendors)
+        return cls(vendors=vendors, max_retries=max_retries)
 
     def chat(
         self,

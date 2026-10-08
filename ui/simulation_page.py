@@ -155,8 +155,6 @@ class SimWorker(QThread):
             self.recoverable.emit(str(e))
         except Exception as e:
             self.failed.emit(str(e))
-        # run() 返回后 QThread 自动发射 finished(void) 信号，由主线程的
-        # _on_worker_finished 槽断开信号连接；对象在下一次 _dispose_worker 时回收。
 
 
 class SimulationPage(QWidget):
@@ -169,7 +167,6 @@ class SimulationPage(QWidget):
         self._pid = None
         self._running = False
         self._worker = None
-        self._signals_cleaned = False
         self._ss = SimulationService()
         # 外部日志出口（工作区终端），由 WorkspacePage 注入
         self._log_sink = None
@@ -320,7 +317,6 @@ class SimulationPage(QWidget):
         except RuntimeError:
             pass
         self._worker = None
-        self._signals_cleaned = False
 
     def _load_history(self):
         """从 DB 装载主仿真的历史轮次数据并回显到日志和指标卡。"""
@@ -409,8 +405,8 @@ class SimulationPage(QWidget):
             self._set_action("⏸ 暂停")
             return
 
-        # 替换旧 worker 前必须等其线程真正结束，否则对运行中的 QThread
-        # 调用 disconnect/deleteLater 会触发 use-after-free 崩溃。
+        # 运行中的 QThread 不能直接 disconnect/deleteLater（use-after-free）：
+        # 先经 _dispose_worker 等待清理，等不到则由 finished 信号自行收尾
         self._dispose_worker()
 
         llm, checkpoint = self._ss.prepare_start(self._pid)
@@ -431,20 +427,30 @@ class SimulationPage(QWidget):
         self._worker.succeeded.connect(self._on_succeeded)
         self._worker.failed.connect(self._on_failed)
         self._worker.recoverable.connect(self._on_recoverable)
-        # 关键：连接 QThread 内置的 finished(void) 信号（run() 返回后由 Qt
-        # 自动发射）做安全清理。不要连到 succeeded/failed/recoverable 上，
-        # 因为那些信号发射时线程可能还在执行后续代码。
-        self._worker.finished.connect(self._on_worker_finished)
+        # 连接 QThread 内置的 finished(void) 做收尾：run() 返回后由 Qt 自动发射，
+        # 不能改用 succeeded/failed/recoverable，那些信号发射时线程仍可能在收尾
+        self._worker.finished.connect(lambda w=self._worker: self._on_worker_finished(w))
 
         self._running = True
         self._set_action("⏸ 暂停")
         self._worker.start()
 
+    def _cleanup_worker(self, w):
+        """断开 worker 的信号并安排回收；对象已销毁时静默跳过。"""
+        self._disconnect_worker_signals(w)
+        try:
+            w.finished.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            w.deleteLater()
+        except RuntimeError:
+            pass
+
     def _dispose_worker(self):
         """同步等待旧 worker 线程结束后安全清理。调用方在主线程。
 
-        取消后等待线程自行退出（引擎在当前 LLM 调用完成后保存检查点
-        并干净结束），超时按默认请求超时 30s 留余量。
+        取消后等待线程自行退出；等待超时则交由 finished 信号链收尾。
         """
         w = self._worker
         if w is None:
@@ -457,35 +463,17 @@ class SimulationPage(QWidget):
             self._worker = None
             return
         if not finished:
-            # 等待超时说明引擎侧的 LLM 调用仍未返回、线程还活着：
-            # 不断开信号、不 deleteLater，留待 finished 信号链收尾
+            # 线程仍在执行无法中断的调用：不能 disconnect/deleteLater，
+            # 由它自己的 finished 信号收尾
             return
-        if not self._signals_cleaned:
-            self._disconnect_worker_signals(w)
-        try:
-            w.finished.disconnect()
-        except (RuntimeError, TypeError):
-            pass
-        self._signals_cleaned = False
-        try:
-            w.deleteLater()
-        except RuntimeError:
-            pass
+        self._cleanup_worker(w)
         self._worker = None
 
-    def _on_worker_finished(self):
-        """QThread.run() 返回后在主线程安全断开信号连接。
-
-        此时线程已真正结束，disconnect 不会引发 use-after-free。
-        对象本身留待下一次 _dispose_worker 时通过 deleteLater 回收。
-        """
-        w = self._worker
-        if w is None:
-            return
-        self._disconnect_worker_signals(w)
-        self._signals_cleaned = True
-        # 注意：不在此处置 self._worker = None，否则 _toggle 重启时无法
-        # 调用 _dispose_worker 等待旧线程。deleteLater 足以保证对象回收。
+    def _on_worker_finished(self, worker):
+        """worker 线程结束后在主线程收尾并回收对象。"""
+        self._cleanup_worker(worker)
+        if worker is self._worker:
+            self._worker = None
 
     def _on_succeeded(self, pid, report, results):
         self._running = False
@@ -560,8 +548,7 @@ class SimulationPage(QWidget):
     def stop_worker(self):
         """安全停止工作线程，供主窗口关闭时调用。
 
-        仅发送取消信号，不阻塞等待。引擎在 LLM 调用完成后自行保存
-        检查点并退出，线程结束不影响进程关闭。
+        仅发送取消信号，不阻塞等待；窗口关闭后进程随即退出，线程随进程终止。
         """
         if self._worker is None:
             return

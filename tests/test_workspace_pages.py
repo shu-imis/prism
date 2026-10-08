@@ -134,9 +134,10 @@ class WorkspacePageWorkerTests(QtDbTestCase):
         """iter_ai_workers 合并各子页面的 _ai_workers，供关窗兜底。"""
         page = self.track(WorkspacePage())
         self.assertEqual(page.iter_ai_workers(), [])
-        sentinel = object()
-        page._scp._ai_workers = [sentinel]
-        self.assertEqual(page.iter_ai_workers(), [sentinel])
+        first, last = object(), object()
+        page._scp._ai_workers = [first]
+        page._rp._ai_workers = [last]
+        self.assertEqual(page.iter_ai_workers(), [first, last])
 
 
 class ResultPageTests(QtDbTestCase):
