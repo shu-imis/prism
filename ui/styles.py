@@ -244,14 +244,14 @@ PopupMenu {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; }}
 #dangerBtn:disabled {{ background: {_alpha(COLOR_RED, 0.15)}; color: {_alpha(COLOR_RED, 0.5)}; }}
 
 /* ---- 输入 ---- */
-QLineEdit, QPlainTextEdit, QTextEdit {{
+QLineEdit, QTextEdit {{
     background: {BG_INPUT};
     border: 1px solid {BORDER};
     border-radius: 0px;
     padding: 5px 8px;
     color: {TEXT_PRIMARY};
 }}
-QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{
+QLineEdit:focus, QTextEdit:focus {{
     border-color: {TEXT_PRIMARY};
 }}
 
@@ -307,6 +307,24 @@ def mono_value_qss(size: int, color: str, bold: bool = False) -> str:
 def status_dot_qss(color: str) -> str:
     """状态圆点（● 字符着色）。"""
     return f"color: {color}; font-size: 10px;"
+
+
+def log_view_qss(variant: str = "paper") -> str:
+    """只读日志视图：terminal 深色终端 / paper 浅色纸面。"""
+    if variant == "terminal":
+        return (
+            "QTextEdit{"
+            f"background:{BG_TERMINAL};color:{TERMINAL_TEXT};"
+            "font-family:'JetBrains Mono','Noto Sans SC';font-size:11px;"
+            "border:none;padding:0px;"
+            "}"
+        )
+    return (
+        "QTextEdit{"
+        f"background:{BG_INPUT};color:{TEXT_PRIMARY};"
+        f"border:1px solid {BORDER};font-size:12px;padding:0px;"
+        "}"
+    )
 
 
 def segmented_qss() -> str:
@@ -408,7 +426,7 @@ def sidebar_inactive_qss() -> str:
 
 
 # ============================================================
-# 工作区（ui/workspace_page.py）— 顶栏与日志终端
+# 工作区（ui/workspace_page.py）— 顶栏
 # ============================================================
 
 def workspace_bar_qss() -> str:
@@ -427,26 +445,6 @@ def workspace_step_tag_qss() -> str:
 def workspace_step_name_qss() -> str:
     """顶栏步骤名称。"""
     return f"font-size:13px;font-weight:700;color:{TEXT_ON_DARK};"
-
-
-def terminal_qss() -> str:
-    """日志终端控制台（#terminalLog，配色与全局滚动条作用域同源）。"""
-    return (
-        "QPlainTextEdit{"
-        f"background:{BG_TERMINAL};color:{TERMINAL_TEXT};"
-        "font-family:'JetBrains Mono','Noto Sans SC';font-size:11px;"
-        "border:none;padding:0px;"
-        "}"
-    )
-
-
-# ============================================================
-# 仿真页（ui/simulation_page.py）
-# ============================================================
-
-def simulation_log_qss() -> str:
-    """仿真日志区：浅底输入风格的只读日志框。"""
-    return f"QTextEdit{{background:{BG_INPUT};border:1px solid {BORDER};font-size:12px;padding:0px;}}"
 
 
 # ============================================================

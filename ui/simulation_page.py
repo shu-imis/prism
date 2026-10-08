@@ -19,20 +19,19 @@ from core.text_utils import normalize_speech
 from llm.config import active_vendor_label, get_active_vendor_settings
 from services.ai import CLIENT_UNAVAILABLE_MESSAGE
 from services.simulation import SimulationRun, SimulationService
-from ui.scroll import ChainingTextEdit
 from ui.styles import (
     COLOR_RED_STRONG,
     PAD_SM,
     PAD_XL,
     TEXT_PRIMARY,
     mono_value_qss,
-    simulation_log_qss,
 )
 from ui.widgets import (
     Caption,
     Card,
     ConfirmDialog,
     GhostBtn,
+    LogView,
     ProgressBar,
     SecondaryBtn,
     Title,
@@ -222,12 +221,8 @@ class SimulationPage(QWidget):
         self._st.setVisible(False)
         layout.addWidget(self._st)
 
-        self._log = ChainingTextEdit()
-        self._log.setReadOnly(True)
+        self._log = LogView("paper")
         self._log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._log.setStyleSheet(simulation_log_qss())
-        # 滚动条贴控件右边框（padding=0），文本左右间距由 viewport margins 对称控制
-        self._log.setViewportMargins(8, 5, 8, 5)
         # 空态占位：未开始仿真时说明该区域将承载内容
         self._log.setPlaceholderText("启动仿真后，行为体的发言与轮次摘要将在此展开")
         layout.addWidget(self._log, 1)

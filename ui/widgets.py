@@ -5,10 +5,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QEvent, QObject, QPoint, QRectF, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter
+from ui.scroll import ChainingTextEdit
 from ui.styles import (
     ACCENT, BORDER, BTN_H, COLOR_RED, PAD_LG, PAD_MD, PAD_XL,
     TEXT_ON_DARK, TEXT_PRIMARY, TEXT_SECONDARY,
-    dialog_button_qss, popup_item_qss, segmented_qss, small_text_qss, status_dot_qss,
+    dialog_button_qss, log_view_qss, popup_item_qss, segmented_qss, small_text_qss, status_dot_qss,
     stepper_button_qss, stepper_input_qss, tip_popup_qss,
 )
 
@@ -163,11 +164,31 @@ class StatusDot(QLabel):
         self.setStyleSheet(status_dot_qss(color))
 
 
+class LogView(ChainingTextEdit):
+    """只读日志视图：「terminal」深色终端与「paper」浅色纸面两种配色。
+
+    内容由调用方追加；纸面形态允许富文本（用于错误行着色），终端形态按纯文本处理。
+    """
+
+    def __init__(self, variant: str = "paper", parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setAcceptRichText(variant == "paper")
+        if variant == "terminal":
+            # 供全局样式表命中深色滚动条（#terminalLog 作用域）
+            self.setObjectName("terminalLog")
+        self.setStyleSheet(log_view_qss(variant))
+        # 文本内缩：左 视口 20 + 文档 4 对齐内容列 PAD_XL；右 视口 12 + 滚动条 8 + 文档 4；
+        # 上下 视口 4 + 文档 4 取 PAD_SM（约半行）；纸面另有 1px 框线
+        self.setViewportMargins(PAD_XL - 4, 4, PAD_XL - 12, 4)
+
+
 class PopupMenu(QFrame):
-    """自绘弹出菜单 — 替代 QMenu，避免 macOS 原生 NSMenu 渲染导致样式不一致。
+    """自绘弹出菜单。
 
     用法：menu = PopupMenu(parent); menu.add_action("删除", cb); menu.popup(global_pos)
-    Qt.Popup 语义：点击菜单外区域自动关闭（与系统菜单一致），关闭即销毁。
+    Qt.Popup 语义：点击菜单外区域自动关闭，关闭即销毁。
     """
 
     def __init__(self, parent=None):

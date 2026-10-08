@@ -1,7 +1,6 @@
 """工作区"""
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QFrame,
     QHBoxLayout,
     QLabel,
     QStackedWidget,
@@ -15,7 +14,6 @@ from services.workspace import WorkspaceService
 from ui.scenario_page import ScenarioPage
 from ui.persona_page import PersonaPage
 from ui.result_page import ResultPage
-from ui.scroll import ChainingPlainTextEdit
 from ui.simulation_page import SimulationPage
 from ui.styles import (
     BORDER,
@@ -30,12 +28,11 @@ from ui.styles import (
     TEXT_MUTED,
     TEXT_ON_DARK,
     small_text_qss,
-    terminal_qss,
     workspace_bar_qss,
     workspace_step_name_qss,
     workspace_step_tag_qss,
 )
-from ui.widgets import Divider, PrimaryBtn, SecondaryBtn, StatusDot
+from ui.widgets import Divider, LogView, PrimaryBtn, SecondaryBtn, StatusDot
 
 
 class WorkspacePage(QWidget):
@@ -119,14 +116,8 @@ class WorkspacePage(QWidget):
         layout.addLayout(nav)
 
         # --- 日志终端 ---
-        self._log = ChainingPlainTextEdit()
-        self._log.setObjectName("terminalLog")
-        self._log.setReadOnly(True)
+        self._log = LogView("terminal")
         self._log.setFixedHeight(120)
-        self._log.setFrameShape(QFrame.NoFrame)
-        self._log.setStyleSheet(terminal_qss())
-        # 文本左起对齐内容列 PAD_XL：视口边距 20 + 文档隐式边距 4；滚动条贴控件右边框
-        self._log.setViewportMargins(PAD_XL - 4, 6, PAD_XL - 4, 6)
         layout.addWidget(self._log)
 
         self._log_msg("工作区已就绪")
@@ -145,7 +136,7 @@ class WorkspacePage(QWidget):
 
     def _log_msg(self, msg, is_error=False):
         prefix = "×" if is_error else ">"
-        self._log.appendPlainText(f"{prefix}  {msg}")
+        self._log.append(f"{prefix}  {msg}")
 
     def _on_saved(self, pid):
         self._pid = pid

@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from PySide6.QtWidgets import QPlainTextEdit, QScrollArea, QTextEdit
+from PySide6.QtWidgets import QScrollArea, QTextEdit
 
 
 class SmoothScrollArea(QScrollArea):
@@ -67,14 +67,6 @@ class _WheelChain:
 
 class ChainingTextEdit(_WheelChain, QTextEdit):
     """滚到头的 QTextEdit 把滚轮事件交还外层；Tab 让位焦点导航。"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setTabChangesFocus(True)
-
-
-class ChainingPlainTextEdit(_WheelChain, QPlainTextEdit):
-    """滚到头的 QPlainTextEdit 把滚轮事件交还外层；Tab 让位焦点导航。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
