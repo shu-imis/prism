@@ -443,10 +443,6 @@ class ReportRepository:
         ).fetchall()
         return [ReportRecord(**dict(row)) for row in rows]
 
-    def delete_for_project(self, project_id: int) -> None:
-        with self.db.transaction() as conn:
-            conn.execute("DELETE FROM reports WHERE project_id = ?", (project_id,))
-
 
 class CheckpointRepository:
     """仿真检查点持久化。"""
@@ -479,13 +475,6 @@ class CheckpointRepository:
                 (project_id, simulation_id, last_round, to_json(engine_state)),
             )
         return int(cursor.lastrowid)
-
-    def get_by_id(self, checkpoint_id: int) -> Checkpoint | None:
-        row = self.db.conn.execute(
-            "SELECT * FROM checkpoints WHERE id = ?",
-            (checkpoint_id,),
-        ).fetchone()
-        return Checkpoint(**dict(row)) if row else None
 
     def latest_for_project(self, project_id: int) -> Checkpoint | None:
         row = self.db.conn.execute(

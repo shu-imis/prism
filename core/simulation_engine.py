@@ -130,24 +130,13 @@ class AgentTurn:
     warning: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        # stance/speech 为对外序列化的单一键名
+        # 仅序列化对外消费的键；其余字段在 state_json 的行为体快照中另有承载
         return {
-            "agent_id": self.agent_id,
             "agent_name": self.agent_name,
-            "stance": self.decision_stance,
-            "role": self.role,
             "speech": self.speech,
             "action_type": self.action_type,
             "reaction_to": self.reaction_to,
             "metrics": {
-                "inventory_change": self.inventory_change,
-                "cost_change": self.cost_change,
-                "delay_change": self.delay_change,
-                "service_change": self.service_change,
-                "margin_change": self.margin_change,
-                "pressure_change": self.pressure_change,
-                "decision_shift": self.decision_shift,
-                "risk_description": self.risk_description,
                 "skipped": self.skipped,
                 "error_message": self.error_message,
                 "warning": self.warning,
