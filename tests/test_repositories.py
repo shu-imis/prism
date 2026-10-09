@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,13 +53,6 @@ class RepositoryTests(unittest.TestCase):
                 profit_margin=0.12,
                 resilience_score=58.0,
                 state={"key_events": ["需求激增"]},
-                agent_messages=[
-                    {
-                        "agent_name": "零售商",
-                        "decision_stance": "aggressive",
-                        "content": "启动促销活动。",
-                    }
-                ],
             )
             updated_round = round_repo.save(
                 project_id=project.id,
@@ -135,8 +129,8 @@ class RepositoryTests(unittest.TestCase):
             self.assertIsNone(repo.latest_for_project(project.id))
             db.close()
 
-    def test_delete_for_simulation_cascades_agent_messages(self) -> None:
-        """delete_for_simulation 只删轮次，发言经外键级联一并清除。"""
+    def test_delete_for_simulation_clears_rounds(self) -> None:
+        """delete_for_simulation 清空指定仿真的全部轮次。"""
         with tempfile.TemporaryDirectory() as tmp:
             db = Database(Path(tmp) / "prism.db")
             db.migrate()
@@ -152,18 +146,15 @@ class RepositoryTests(unittest.TestCase):
                 cost_index=55.0,
                 delivery_delay=0.5,
                 state={},
-                agent_messages=[{"agent_name": "零售商", "stance": "neutral", "speech": "促销。"}],
             )
 
             round_repo.delete_for_simulation(simulation.id)
 
             self.assertEqual(round_repo.list_by_simulation(simulation.id), [])
-            row = db.conn.execute("SELECT COUNT(*) FROM agent_messages").fetchone()
-            self.assertEqual(row[0], 0)
             db.close()
 
     def test_invalidate_simulation_results(self) -> None:
-        """作废主仿真：轮次/发言/检查点/报告清空，项目状态回退 draft，仿真锚点保留。"""
+        """作废主仿真：轮次/检查点/报告清空，项目状态回退 draft，仿真锚点保留。"""
         with tempfile.TemporaryDirectory() as tmp:
             db = Database(Path(tmp) / "prism.db")
             db.migrate()
@@ -180,7 +171,6 @@ class RepositoryTests(unittest.TestCase):
                 cost_index=55.0,
                 delivery_delay=0.5,
                 state={},
-                agent_messages=[{"agent_name": "零售商", "stance": "neutral", "speech": "促销。"}],
             )
             ReportRepository(db).save(project_id=project.id, title="报告", markdown="md", summary={})
             CheckpointRepository(db).save(
@@ -192,7 +182,7 @@ class RepositoryTests(unittest.TestCase):
 
             self.assertEqual(project_repo.get_by_id(project.id).status, "draft")
             self.assertIsNotNone(SimulationRepository(db).get_main(project.id))
-            for table in ("simulation_rounds", "agent_messages", "checkpoints", "reports"):
+            for table in ("simulation_rounds", "checkpoints", "reports"):
                 row = db.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
                 self.assertEqual(row[0], 0, f"{table} 应被清空")
             db.close()
@@ -220,6 +210,54 @@ class RepositoryTests(unittest.TestCase):
             self.assertEqual(row[0], 30000)
             db.close()
 
+    def test_migrate_upgrades_legacy_schema(self) -> None:
+        """老库迁移：缺列补齐、废表清除，迁移后既有数据正常读写。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            db_file = Path(tmp) / "prism.db"
+            conn = sqlite3.connect(str(db_file))
+            conn.executescript(
+                """
+                CREATE TABLE projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    scenario_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE simulations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    name TEXT NOT NULL DEFAULT '主仿真',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE agent_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    round_id INTEGER NOT NULL
+                );
+                INSERT INTO projects (name) VALUES ('旧项目');
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            db = Database(db_file)
+            db.migrate()
+
+            project = ProjectRepository(db).list_all()[0]
+            self.assertEqual(project.name, "旧项目")
+            self.assertIsNone(project.deleted_at)
+            columns = {
+                row["name"] for row in db.conn.execute("PRAGMA table_info(simulations)")
+            }
+            self.assertIn("scenario_json", columns)
+            tables = {
+                row["name"]
+                for row in db.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            }
+            self.assertNotIn("agent_messages", tables)
+            db.close()
+
     def test_project_recycle_bin(self) -> None:
         """软删除进回收站、可恢复；彻底删除经外键级联清空全部子表。"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -243,7 +281,6 @@ class RepositoryTests(unittest.TestCase):
                 cost_index=55.0,
                 delivery_delay=0.5,
                 state={},
-                agent_messages=[{"agent_name": "零售商", "speech": "促销。"}],
             )
             report_repo.save(project_id=project.id, title="报告", markdown="md", summary={})
             checkpoint_repo.save(
@@ -270,7 +307,7 @@ class RepositoryTests(unittest.TestCase):
             project_repo.hard_delete(project.id)
             self.assertEqual(project_repo.list_deleted(), [])
             for table in (
-                "simulations", "simulation_rounds", "agent_messages",
+                "simulations", "simulation_rounds",
                 "checkpoints", "reports", "knowledge_chunks",
             ):
                 row = db.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()

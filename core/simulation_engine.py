@@ -130,7 +130,7 @@ class AgentTurn:
     warning: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        # stance/speech 为单一序列化键；db 的 agent_messages 写入消费 stance
+        # stance/speech 为对外序列化的单一键名
         return {
             "agent_id": self.agent_id,
             "agent_name": self.agent_name,
@@ -265,7 +265,7 @@ class SimulationEngine:
             rounds = [self._initial_world_state(agents)]
             ws = rounds[0]
             start_round = 1
-            self._persist_round(ws, [])
+            self._persist_round(ws)
             self._save_checkpoint(ws, agents)
 
         # 行动信息流：行为体互动的共享载体。feed 不入检查点，恢复时从空开始，
@@ -415,7 +415,7 @@ class SimulationEngine:
                     f"第 {round_index} 轮所有激活行为体均调用失败或超时，已保存检查点"
                 )
 
-            self._persist_round(ws, messages)
+            self._persist_round(ws)
             self._save_checkpoint(ws, agents)
             self._emit_callbacks(ws, messages)
 
@@ -884,7 +884,7 @@ class SimulationEngine:
             for record in repo.list_by_simulation(simulation_id)
         ]
 
-    def _persist_round(self, state: WorldState, messages: list[dict[str, Any]]) -> None:
+    def _persist_round(self, state: WorldState) -> None:
         repo = self.state.round_repository
         project_id = self.state.project_id
         simulation_id = self._simulation_record_id()
@@ -902,7 +902,6 @@ class SimulationEngine:
             profit_margin=state.profit_margin,
             resilience_score=state.resilience_score,
             state=state.to_dict(),
-            agent_messages=messages,
         )
 
     def _emit_callbacks(self, state: WorldState, messages: list[dict[str, Any]]) -> None:

@@ -80,6 +80,7 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     project_id INTEGER NOT NULL,
                     name TEXT NOT NULL DEFAULT '主仿真',
+                    scenario_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
                 );
@@ -101,17 +102,6 @@ class Database:
                     UNIQUE(simulation_id, round_index),
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                     FOREIGN KEY (simulation_id) REFERENCES simulations(id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS agent_messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    round_id INTEGER NOT NULL,
-                    agent_name TEXT NOT NULL,
-                    stance TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    metrics_json TEXT NOT NULL DEFAULT '{}',
-                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                    FOREIGN KEY (round_id) REFERENCES simulation_rounds(id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE IF NOT EXISTS checkpoints (
@@ -149,14 +139,35 @@ class Database:
                     ON simulations(project_id);
                 CREATE INDEX IF NOT EXISTS idx_rounds_simulation_id
                     ON simulation_rounds(simulation_id, round_index);
-                CREATE INDEX IF NOT EXISTS idx_messages_round_id
-                    ON agent_messages(round_id);
+                CREATE INDEX IF NOT EXISTS idx_checkpoints_project_id
+                    ON checkpoints(project_id);
                 CREATE INDEX IF NOT EXISTS idx_reports_project_id
                     ON reports(project_id);
                 CREATE INDEX IF NOT EXISTS idx_knowledge_project_id
                     ON knowledge_chunks(project_id);
             """
         )
+        # 老库兼容：缺列补列、废表清除，均为幂等操作
+        self._ensure_column(
+            "projects",
+            "deleted_at",
+            "ALTER TABLE projects ADD COLUMN deleted_at TEXT",
+        )
+        self._ensure_column(
+            "simulations",
+            "scenario_json",
+            "ALTER TABLE simulations ADD COLUMN scenario_json TEXT NOT NULL DEFAULT '{}'",
+        )
+        self.conn.execute("DROP TABLE IF EXISTS agent_messages")
+        self.conn.commit()
+
+    def _ensure_column(self, table: str, column: str, ddl: str) -> None:
+        """目标列不存在时执行补列 DDL，存在则跳过。"""
+        columns = {
+            str(row["name"]) for row in self.conn.execute(f"PRAGMA table_info({table})")
+        }
+        if column not in columns:
+            self.conn.execute(ddl)
 
     def close(self) -> None:
         if self._conn:

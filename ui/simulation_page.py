@@ -45,6 +45,22 @@ from ui.widgets import (
 _logger = logging.getLogger(__name__)
 
 
+def _format_speech_line(agent_name: str, action_type: str, reaction_to: str, content: str) -> str:
+    """单条行为体发言的日志行，运行时与历史回填共用同一格式。"""
+    name = html.escape(agent_name)
+    action = html.escape(action_type or "maintain")
+    reaction = f" 回应@{html.escape(reaction_to)}" if reaction_to and reaction_to != "none" else ""
+    return f"    ↳  {name}【{action}】{reaction}：{html.escape(content)}"
+
+
+def _agent_id_sort_key(raw: object) -> tuple[int, int]:
+    """agent_states 的键为行为体 id 的字符串形式，按数值排序；损坏键排到末尾。"""
+    try:
+        return (0, int(raw))
+    except (TypeError, ValueError):
+        return (1, 0)
+
+
 class SimWorker(QThread):
     progress = Signal(int, int, str)
     round_done = Signal(dict)
@@ -385,6 +401,7 @@ class SimulationPage(QWidget):
                 f"成本 {r.cost_index:.0f}  服务 {r.service_level:.0%}  "
                 f"利润 {r.profit_margin:+.1%}"
             )
+            self._append_history_speeches(r.state)
         last_round = rounds[-1]
         self._mv["库存"].setText(f"{last_round.inventory_level:.1f}")
         self._mv["成本"].setText(f"{last_round.cost_index:.1f}")
@@ -419,6 +436,33 @@ class SimulationPage(QWidget):
             self._start.setText("▶ 启动仿真")
             self._start.setEnabled(True)
         self._running = False
+
+    def _append_history_speeches(self, state: dict) -> None:
+        """从轮次状态快照回填行为体发言；行为体名取自固定模板，id 与快照键一致。"""
+        agent_states = state.get("agent_states")
+        if not isinstance(agent_states, dict):
+            return
+        for key in sorted(agent_states, key=_agent_id_sort_key):
+            snapshot = agent_states[key]
+            if not isinstance(snapshot, dict) or not snapshot.get("spoke"):
+                continue
+            content = normalize_speech(str(snapshot.get("speech", "")))
+            if not content:
+                continue
+            try:
+                agent_id = int(key)
+            except (TypeError, ValueError):
+                continue
+            template = AgentFactory.get_template(agent_id)
+            name = template["name"] if template else f"行为体 {key}"
+            self._log.append(
+                _format_speech_line(
+                    name,
+                    str(snapshot.get("action_type", "")),
+                    str(snapshot.get("reaction_to", "")),
+                    content,
+                )
+            )
 
     def _toggle(self):
         if self._running:
@@ -600,11 +644,13 @@ class SimulationPage(QWidget):
             else:
                 content = normalize_speech(msg.get("speech", ""))
                 if content:
-                    action_type = html.escape(msg.get("action_type", "maintain"))
-                    reaction_to = msg.get("reaction_to", "none")
-                    reaction = f" 回应@{html.escape(reaction_to)}" if reaction_to != "none" else ""
                     self._log.append(
-                        f"    ↳  {agent_name}【{action_type}】{reaction}：{html.escape(content)}"
+                        _format_speech_line(
+                            msg.get("agent_name", "未知行为体"),
+                            msg.get("action_type", "maintain"),
+                            msg.get("reaction_to", "none"),
+                            content,
+                        )
                     )
 
     def is_running(self) -> bool:
