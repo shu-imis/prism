@@ -27,10 +27,13 @@ from llm.config import (
 from ui.ai_worker import run_ai_task
 from ui.scroll import SmoothScrollArea
 from ui.styles import (
+    COLOR_GREEN,
+    COLOR_RED,
     PAD_LG,
     PAD_MD,
     PAD_SM,
     PAD_XL,
+    TEXT_SECONDARY,
     settings_status_qss,
 )
 from ui.widgets import (
@@ -51,6 +54,7 @@ class SettingsPage(QWidget):
         super().__init__(parent)
         self._vendor_state: dict[int, dict[str, str]] = {}
         self._vendor_index = 0
+        self._testing = False
         self._build()
         self._load()
 
@@ -200,13 +204,15 @@ class SettingsPage(QWidget):
 
     # --- 操作 ---
 
-    def _set_status(self, text: str, is_error: bool = False):
+    def _set_status(self, text: str, color: str = TEXT_SECONDARY):
         self._status.setText(text)
-        self._status.setStyleSheet(settings_status_qss(is_error))
+        self._status.setStyleSheet(settings_status_qss(color))
         self._status.setVisible(bool(text))
 
     def _clear_status(self, *_args):
         """字段内容变化后清掉旧状态提示：保存/测试结果只对当时的字段值有效。"""
+        if self._testing:  # 进行中保持进度提示，不响应字段变更
+            return
         self._set_status("")
 
     def _wire_status_invalidation(self):
@@ -243,21 +249,21 @@ class SettingsPage(QWidget):
 
         if not (ok_vendor and ok_vars):
             self._set_status(
-                "配置已生效，但钥匙串/.env 写入失败，重启后将丢失", is_error=True
+                "配置已生效，但钥匙串/.env 写入失败，重启后将丢失", COLOR_RED
             )
             return
         label = PRESETS[self._vendor_index]["label"]
         if self._key.text().strip():
-            self._set_status(f"已保存，当前生效厂商：{label}")
+            self._set_status(f"已保存，当前生效厂商：{label}", COLOR_GREEN)
         else:
             self._set_status(
                 f"已保存，但 {label} 未填写 API Key，AI 功能暂不可用",
-                is_error=True,
+                COLOR_RED,
             )
 
     def _on_test(self):
         if not self._key.text().strip():
-            self._set_status("请先填写 API Key", is_error=True)
+            self._set_status("请先填写 API Key", COLOR_RED)
             return
         preset = PRESETS[self._vendor_index]
         settings = VendorSettings(
@@ -266,8 +272,9 @@ class SettingsPage(QWidget):
             self._key.text().strip(),
             self._url.text().strip() or preset.get("url", "") or None,
         )
-        self._test_btn.setEnabled(False)
-        self._set_status("正在测试连接…")
+        self._test_btn.setVisible(False)
+        self._testing = True
+        self._set_status("测试连接中…")
         run_ai_task(
             self,
             lambda: check_vendor(settings),
@@ -276,5 +283,6 @@ class SettingsPage(QWidget):
         )
 
     def _on_test_done(self, msg: str, is_error: bool):
-        self._test_btn.setEnabled(True)
-        self._set_status(msg, is_error)
+        self._testing = False
+        self._test_btn.setVisible(True)
+        self._set_status(msg, COLOR_RED if is_error else COLOR_GREEN)

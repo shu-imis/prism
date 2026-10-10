@@ -1,5 +1,6 @@
 """供应链搭建"""
 
+import json
 from pathlib import Path
 
 from PySide6.QtCore import Signal
@@ -40,6 +41,7 @@ from ui.styles import (
 from ui.widgets import (
     Caption,
     Card,
+    ConfirmDialog,
     DangerBtn,
     DecimalInput,
     Divider,
@@ -48,6 +50,7 @@ from ui.widgets import (
     NumberInput,
     SecondaryBtn,
     SegmentedControl,
+    StatusLabel,
     Title,
     clear_layout,
 )
@@ -211,6 +214,8 @@ class EventPage(QWidget):
         super().__init__(parent)
         self._pid = None
         self._imported = []
+        self._form_baseline = None
+        self._discard_snapshot = None
         # 终端日志回调：默认空实现，由 ProcessPage 注入覆盖（单独实例化也能用）
         self.log = lambda *args, **kwargs: None
         self._build()
@@ -251,9 +256,13 @@ class EventPage(QWidget):
         self._import_btn = SecondaryBtn("导入背景文档")
         self._import_btn.clicked.connect(self._import_docs)
         btn_row.addWidget(self._import_btn)
+        self._import_status = StatusLabel()
+        btn_row.addWidget(self._import_status)
         self._ai_btn = GhostBtn("AI 分析并自动填写")
         self._ai_btn.clicked.connect(self._ai_fill)
         btn_row.addWidget(self._ai_btn)
+        self._ai_status = StatusLabel()
+        btn_row.addWidget(self._ai_status)
         btn_row.addStretch()
         card.add_layout(btn_row)
 
@@ -314,9 +323,12 @@ class EventPage(QWidget):
         self._pid = p.id
         # 清空上个项目残留的导入文档，避免误存进当前项目
         self._imported = []
+        self._discard_snapshot = None
         self._render_imported_docs()
         self._render_knowledge_base()
-        s = p.scenario
+        self._fill_form(p.scenario)
+
+    def _fill_form(self, s):
         self._title.setText(s.get("title", ""))
         self._industry.setText(s.get("industry", ""))
         self._bg.setPlainText(s.get("background", ""))
@@ -324,10 +336,30 @@ class EventPage(QWidget):
         self._cost.setValue(int(s.get("baseline_cost", DEFAULT_BASELINE_COST)))
         self._svc.setValue(s.get("baseline_service_level", DEFAULT_BASELINE_SERVICE_LEVEL))
         self._node_editor.set_nodes(s.get("nodes", DEFAULT_NODES))
+        self._form_baseline = self._collect_form()
+
+    def _collect_form(self):
+        """收集当前表单的场景字段，不含 Step2 的配置。"""
+        return {
+            "title": self._title.text().strip(),
+            "industry": self._industry.text(),
+            "background": self._bg.toPlainText().strip(),
+            "nodes": self._node_editor.get_nodes(),
+            "initial_inventory": self._inv.value(),
+            "baseline_cost": self._cost.value(),
+            "baseline_service_level": self._svc.value(),
+        }
+
+    def has_unsaved_changes(self) -> bool:
+        """本步是否有未保存的修改，供导航与状态指示判断。"""
+        if self._form_baseline is None:
+            return False
+        return self._collect_form() != self._form_baseline
 
     def reset(self):
         self._pid = None
         self._imported = []
+        self._discard_snapshot = None
         self._render_imported_docs()
         self._render_knowledge_base()
         self._title.clear()
@@ -337,6 +369,7 @@ class EventPage(QWidget):
         self._inv.setValue(int(DEFAULT_INITIAL_INVENTORY))
         self._cost.setValue(int(DEFAULT_BASELINE_COST))
         self._svc.setValue(DEFAULT_BASELINE_SERVICE_LEVEL)
+        self._form_baseline = self._collect_form()
 
     def _import_docs(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -349,6 +382,7 @@ class EventPage(QWidget):
         run_ai_task_with_button(
             self,
             self._import_btn,
+            self._import_status,
             "导入中…",
             lambda: import_documents(files),
             lambda imported: self._on_docs_imported(imported, pid),
@@ -428,7 +462,16 @@ class EventPage(QWidget):
     def _clear_knowledge_base(self):
         if not self._pid:
             return
+        if not ConfirmDialog.confirm(
+            self,
+            "清空知识库",
+            "确定清空该项目的知识库吗？\n已入库的分块与已导入的文档清单将一并删除，仿真检索不再包含这些内容。",
+            ok_text="清空",
+            danger=True,
+        ):
+            return
         KnowledgeRepository().replace_for_project(self._pid, [])
+        self._clear_imported_docs()
         self._render_knowledge_base()
         self.log("已清空项目知识库")
 
@@ -449,6 +492,7 @@ class EventPage(QWidget):
         run_ai_task_with_button(
             self,
             self._ai_btn,
+            self._ai_status,
             "AI 分析中…",
             lambda: extract_scenario_from_docs(client, docs_text),
             lambda sc: self._on_ai_scenario(sc, pid),
@@ -480,34 +524,21 @@ class EventPage(QWidget):
         self._save()
 
     def _save(self):
-        t = self._title.text().strip()
+        form = self._collect_form()
+        t = form["title"]
         if not t:
             self.log("请填写供应链名称", is_error=True)
             return
         if len(t) > 80:
             self.log("名称请勿超过 80 字", is_error=True)
             return
-
-        bg = self._bg.toPlainText().strip()
-        if not bg:
+        if not form["background"]:
             self.log("请填写供应链背景", is_error=True)
             return
-
-        nodes = self._node_editor.get_nodes()
-        for n in nodes:
+        for n in form["nodes"]:
             if not n["name"]:
                 self.log("请填写所有节点名称", is_error=True)
                 return
-
-        sc = {
-            "title": t,
-            "industry": self._industry.text(),
-            "background": bg,
-            "nodes": nodes,
-            "initial_inventory": self._inv.value(),
-            "baseline_cost": self._cost.value(),
-            "baseline_service_level": self._svc.value(),
-        }
 
         repo = ProjectRepository()
         if self._pid:
@@ -518,16 +549,41 @@ class EventPage(QWidget):
                 # 项目已在首页被删除：不保存、不崩，提示用户重新创建
                 self.log("项目已被删除，请回到首页重新创建或打开其他项目", is_error=True)
                 return
-            merged = dict(project.scenario)
-            merged.update(sc)
-            sc = merged
-            # 场景变更使旧仿真结果失效：清轮次/检查点/报告并回到草稿
-            if project.status in ("completed", "interrupted"):
-                invalidate_simulation_results(self._pid)
-            p = repo.update_scenario(self._pid, sc, name=t)
-            pid = p.id
+            # 与本步载入时的表单比对：识别用户真实编辑，不受库中存储格式影响
+            changed = form != self._form_baseline
+            sc = dict(project.scenario)
+            sc.update(form)
+            if not changed:
+                # 无改动：不写库，直接继续
+                self._discard_snapshot = None
+                pid = self._pid
+            else:
+                if project.status in ("completed", "interrupted"):
+                    fingerprint = json.dumps(form, sort_keys=True, ensure_ascii=False)
+                    if fingerprint == self._discard_snapshot:
+                        # 上次取消保存后未再编辑：确认放弃修改，表单恢复后直接继续
+                        self._discard_snapshot = None
+                        self._fill_form(project.scenario)
+                        self.log("已放弃未保存的修改")
+                        self.project_saved.emit(self._pid)
+                        return
+                    # 场景变更使旧仿真结果失效；清前先确认
+                    if not ConfirmDialog.confirm(
+                        self,
+                        "保存并清除仿真结果",
+                        "场景已变更，该项目的全部仿真轮次、断点与报告将被清除，无法恢复。",
+                        ok_text="保存并清除",
+                        danger=True,
+                    ):
+                        self._discard_snapshot = fingerprint
+                        self.log("本步修改未保存；再点「下一步」将放弃修改并继续")
+                        return
+                    invalidate_simulation_results(self._pid)
+                self._discard_snapshot = None
+                p = repo.update_scenario(self._pid, sc, name=t)
+                pid = p.id
         else:
-            p = repo.create(t, sc)
+            p = repo.create(t, form)
             pid = p.id
             self._pid = pid
 
@@ -542,4 +598,6 @@ class EventPage(QWidget):
             )
         self._render_knowledge_base()
 
+        self._form_baseline = form
+        self.log(f"项目已保存（#{pid}）")
         self.project_saved.emit(pid)

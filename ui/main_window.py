@@ -19,13 +19,20 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 最小尺寸按内容页实测最小宽度（Step1 节点行 1017）取整上抬，横向滚动仅作兜底
-        self.setMinimumSize(1040, 640)
-        self.resize(1100, 700)
+        self.setMinimumSize(1024, 640)
+        self.resize(1280, 800)
         self.setWindowTitle("Prism")
         self.setStyleSheet(stylesheet())
         self._setup_window()
         self._build()
-        self._center()
+        self._centered = False
+
+    def showEvent(self, event):
+        # 尺寸到首次显示才最终确定，此时居中才不会偏
+        super().showEvent(event)
+        if not self._centered:
+            self._centered = True
+            self._center()
 
     def changeEvent(self, event):
         if event.type() == event.Type.ActivationChange:

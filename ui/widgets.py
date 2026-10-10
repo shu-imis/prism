@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter
 from ui.styles import (
     ACCENT, BORDER, BTN_H, COLOR_RED, PAD_LG, PAD_MD, PAD_XL,
     TEXT_ON_DARK, TEXT_PRIMARY, TEXT_SECONDARY,
-    dialog_button_qss, popup_item_qss, segmented_qss, status_dot_qss,
+    dialog_button_qss, popup_item_qss, segmented_qss, small_text_qss, status_dot_qss,
     stepper_button_qss, stepper_input_qss, tip_popup_qss,
 )
 
@@ -59,6 +59,15 @@ class DangerBtn(QPushButton):
         self.setObjectName("dangerBtn")
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedHeight(BTN_H)
+
+
+class StatusLabel(QLabel):
+    """进行中状态文字：按钮让位时承接进度文案。"""
+
+    def __init__(self, parent=None):
+        super().__init__("", parent)
+        self.setStyleSheet(small_text_qss(TEXT_SECONDARY))
+        self.setVisible(False)
 
 
 class SegmentedControl(QWidget):
@@ -238,6 +247,14 @@ class ConfirmDialog(QDialog):
         btns.addWidget(ok_btn, 1)
         ly.addLayout(btns)
 
+        # Enter/Space 的目标：危险弹窗初始落“取消”，其余落确定
+        if danger and cancel_text:
+            cancel_btn.setDefault(True)
+            cancel_btn.setFocus()
+        else:
+            ok_btn.setDefault(True)
+            ok_btn.setFocus()
+
     def showEvent(self, event):
         """显式定位到窗口中心（Qt 默认按父控件居中，受布局时序影响）。"""
         super().showEvent(event)
@@ -408,6 +425,8 @@ class _StepperInput(QWidget):
         self._plus.clicked.connect(self._increase)
         layout.addWidget(self._plus)
 
+        self._sync_bounds()
+
     def _parse(self, text):
         raise NotImplementedError
 
@@ -417,6 +436,17 @@ class _StepperInput(QWidget):
     def _clamp(self, val):
         return max(self._min, min(val, self._max))
 
+    def _sync_bounds(self):
+        """到达边界时禁用对应按键；非法输入期间两个都保持可用。"""
+        try:
+            val = self._parse(self._input.text())
+        except ValueError:
+            self._minus.setEnabled(True)
+            self._plus.setEnabled(True)
+            return
+        self._minus.setEnabled(val > self._min)
+        self._plus.setEnabled(val < self._max)
+
     def _increase(self):
         try:
             val = self._parse(self._input.text())
@@ -424,6 +454,7 @@ class _StepperInput(QWidget):
             val = self._min  # 非法输入从最小值起步
         val = min(val + self._step, self._max)
         self._input.setText(self._format(val))
+        self._sync_bounds()
 
     def _decrease(self):
         try:
@@ -432,6 +463,7 @@ class _StepperInput(QWidget):
             val = self._min  # 非法输入从最小值起步
         val = max(val - self._step, self._min)
         self._input.setText(self._format(val))
+        self._sync_bounds()
 
     def _validate_input(self):
         try:
@@ -439,6 +471,7 @@ class _StepperInput(QWidget):
             self._input.setText(self._format(val))
         except ValueError:
             self._input.setText(self._format(self._min))
+        self._sync_bounds()
 
     def value(self):
         try:
@@ -448,10 +481,12 @@ class _StepperInput(QWidget):
 
     def setValue(self, val):
         self._input.setText(self._format(self._clamp(val)))
+        self._sync_bounds()
 
     def setRange(self, min_val, max_val):
         self._min = min_val
         self._max = max_val
+        self._sync_bounds()
 
 
 class NumberInput(_StepperInput):

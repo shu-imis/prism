@@ -25,6 +25,7 @@ from db.models import (
     ProjectRepository,
     SimulationRepository,
     SimulationRoundRepository,
+    invalidate_simulation_results,
 )
 from llm.analysis import analyze_evolution
 from llm.config import active_vendor_label, build_llm_client, get_active_vendor_settings
@@ -40,6 +41,7 @@ from ui.styles import (
 from ui.widgets import (
     Caption,
     Card,
+    ConfirmDialog,
     GhostBtn,
     ProgressBar,
     SecondaryBtn,
@@ -657,19 +659,18 @@ class SimulationPage(QWidget):
             pass  # C++ 对象已被 deleteLater 清理
 
     def _on_reset(self):
-        """显式重置：停止工作线程，清除检查点与历史轮次后还原仿真页面状态。"""
+        """显式重置：停止工作线程，作废轮次、检查点与报告后还原仿真页面状态。"""
+        if not ConfirmDialog.confirm(
+            self,
+            "重置仿真",
+            "将清除该项目的全部仿真轮次、断点与报告，项目回到草稿状态，无法恢复。",
+            ok_text="重置",
+            danger=True,
+        ):
+            return
         self._dispose_worker()
         if self._pid:
-            CheckpointRepository().delete_for_project(self._pid)
-            main = SimulationRepository().get_main(self._pid)
-            if main:
-                SimulationRoundRepository().delete_for_simulation(main.id)
-            # 将项目状态回退到草稿，避免项目列表显示过期状态
-            project = ProjectRepository().get_by_id(self._pid)
-            if project and project.status != "draft":
-                ProjectRepository().update_scenario(
-                    self._pid, dict(project.scenario), status="draft"
-                )
+            invalidate_simulation_results(self._pid)
         self._reset()
 
     def _reset(self):
