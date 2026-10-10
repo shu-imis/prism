@@ -12,6 +12,45 @@ DEFAULT_INITIAL_INVENTORY = 75.0
 DEFAULT_BASELINE_COST = 50.0
 DEFAULT_BASELINE_SERVICE_LEVEL = 0.85
 
+# 节点字段默认值（表单默认 / AI 校验 / 演示场景共用）
+NODE_DEFAULTS = {
+    "type": "supplier",
+    "inventory": 50,
+    "lead_time": 2,
+    "capacity": 100,
+    "cost_index": 50,
+}
+
+
+def build_node(name: str = "", **values) -> dict:
+    """构建字段完整的节点字典，未给出的字段取 NODE_DEFAULTS。"""
+    node = {
+        "name": name,
+        "type": NODE_DEFAULTS["type"],
+        "inventory": NODE_DEFAULTS["inventory"],
+        "lead_time": NODE_DEFAULTS["lead_time"],
+        "capacity": NODE_DEFAULTS["capacity"],
+        "cost_index": NODE_DEFAULTS["cost_index"],
+        "upstream": [],
+        "downstream": [],
+    }
+    node.update(values)
+    return node
+
+
+def format_refs(value) -> str:
+    """节点引用列表转为输入框展示文本。"""
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return value
+    return ", ".join(str(item).strip() for item in value if str(item).strip())
+
+
+def parse_refs(text) -> list[str]:
+    """输入框文本解析为节点引用列表。"""
+    return [part.strip() for part in str(text).split(",") if part.strip()]
+
 
 @dataclass
 class Scenario:

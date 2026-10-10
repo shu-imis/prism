@@ -30,13 +30,15 @@ class NodeEditorTests(QtDbTestCase):
         self.assertFalse(ed._nodes[0]["remove"].isEnabled())
 
     def test_get_nodes_uses_cost_index_key(self) -> None:
-        """节点内部键统一为 cost_index；旧数据的 cost 键在读取边界回退。"""
+        """节点输出字段集固定，cost_index 原样带出。"""
         ed = self.track(NodeEditor())
-        ed.add_node({"name": "旧节点", "cost": 66})
-        ed.add_node({"name": "新节点", "cost_index": 33})
+        ed.add_node({"name": "节点", "cost_index": 33})
         nodes = ed.get_nodes()
-        self.assertEqual(nodes[0]["cost_index"], 66)
-        self.assertEqual(nodes[1]["cost_index"], 33)
+        self.assertEqual(nodes[0]["cost_index"], 33)
+        self.assertEqual(set(nodes[0]), {
+            "name", "type", "inventory", "lead_time",
+            "capacity", "cost_index", "upstream", "downstream",
+        })
 
 
 class EventPageTests(QtDbTestCase):

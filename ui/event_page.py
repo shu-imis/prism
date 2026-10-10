@@ -25,6 +25,9 @@ from core.scenario_parser import (
     DEFAULT_BASELINE_COST,
     DEFAULT_BASELINE_SERVICE_LEVEL,
     DEFAULT_INITIAL_INVENTORY,
+    build_node,
+    format_refs,
+    parse_refs,
 )
 from db.models import KnowledgeRepository, ProjectRepository, invalidate_simulation_results
 from llm.analysis import extract_scenario_from_docs
@@ -56,23 +59,11 @@ from ui.widgets import (
 )
 
 DEFAULT_NODES = [
-    {"name": "节点 1", "type": "supplier", "inventory": 80, "lead_time": 2, "capacity": 100, "cost_index": 52, "downstream": ["节点 2"]},
-    {"name": "节点 2", "type": "manufacturer", "inventory": 60, "lead_time": 3, "capacity": 150, "cost_index": 58, "upstream": ["节点 1"], "downstream": ["节点 3"]},
-    {"name": "节点 3", "type": "distributor", "inventory": 50, "lead_time": 1, "capacity": 200, "cost_index": 54, "upstream": ["节点 2"], "downstream": ["节点 4"]},
-    {"name": "节点 4", "type": "retailer", "inventory": 40, "lead_time": 1, "capacity": 80, "cost_index": 49, "upstream": ["节点 3"]},
+    build_node(name="节点 1", type="supplier", inventory=80, lead_time=2, capacity=100, cost_index=52, downstream=["节点 2"]),
+    build_node(name="节点 2", type="manufacturer", inventory=60, lead_time=3, capacity=150, cost_index=58, upstream=["节点 1"], downstream=["节点 3"]),
+    build_node(name="节点 3", type="distributor", inventory=50, lead_time=1, capacity=200, cost_index=54, upstream=["节点 2"], downstream=["节点 4"]),
+    build_node(name="节点 4", type="retailer", inventory=40, lead_time=1, capacity=80, cost_index=49, upstream=["节点 3"]),
 ]
-
-
-def _format_refs(value):
-    if not value:
-        return ""
-    if isinstance(value, str):
-        return value
-    return ", ".join(str(item).strip() for item in value if str(item).strip())
-
-
-def _parse_refs(text):
-    return [part.strip() for part in str(text).split(",") if part.strip()]
 
 
 class NodeEditor(QWidget):
@@ -83,12 +74,7 @@ class NodeEditor(QWidget):
         self._layout.setSpacing(PAD_SM)
 
     def add_node(self, data=None):
-        d = data or {
-            "name": "", "type": "supplier",
-            "inventory": 50, "cost_index": 50,
-            "lead_time": 2, "capacity": 100,
-            "upstream": [], "downstream": [],
-        }
+        d = build_node(**(data or {}))
         card = Card(padding=PAD_MD)
 
         hdr = QHBoxLayout()
@@ -103,12 +89,12 @@ class NodeEditor(QWidget):
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("名称"))
         name = Input("如：华东仓")
-        name.setText(str(d.get("name", "")))
+        name.setText(str(d["name"]))
         row1.addWidget(name)
 
         row1.addWidget(QLabel("类型"))
         type_seg = SegmentedControl(NODE_TYPES)
-        type_seg.setValue(d.get("type", "supplier"))
+        type_seg.setValue(d["type"])
         row1.addWidget(type_seg)
         row1.addStretch()
 
@@ -116,31 +102,31 @@ class NodeEditor(QWidget):
 
         row2 = QHBoxLayout()
         row2.addWidget(QLabel("库存"))
-        inv = NumberInput(value=int(d.get("inventory", 50)), min_val=0, max_val=100)
+        inv = NumberInput(value=int(d["inventory"]), min_val=0, max_val=100)
         row2.addWidget(inv)
 
         row2.addWidget(QLabel("交货周期"))
-        lead = NumberInput(value=int(d.get("lead_time", 2)), min_val=0, max_val=10)
+        lead = NumberInput(value=int(d["lead_time"]), min_val=0, max_val=10)
         row2.addWidget(lead)
 
         row2.addWidget(QLabel("产能上限"))
-        cap = NumberInput(value=int(d.get("capacity", 100)), min_val=0, max_val=200)
+        cap = NumberInput(value=int(d["capacity"]), min_val=0, max_val=200)
         row2.addWidget(cap)
 
         row2.addWidget(QLabel("成本指数"))
-        cost_idx = NumberInput(value=int(d.get("cost_index", d.get("cost", 50))), min_val=0, max_val=100)
+        cost_idx = NumberInput(value=int(d["cost_index"]), min_val=0, max_val=100)
         row2.addWidget(cost_idx)
         row2.addStretch()
         card.add_layout(row2)
 
         row3 = QHBoxLayout()
         row3.addWidget(QLabel("上游节点"))
-        up = QLineEdit(_format_refs(d.get("upstream", [])))
+        up = QLineEdit(format_refs(d["upstream"]))
         up.setPlaceholderText("名称，逗号分隔")
         row3.addWidget(up)
 
         row3.addWidget(QLabel("下游节点"))
-        down = QLineEdit(_format_refs(d.get("downstream", [])))
+        down = QLineEdit(format_refs(d["downstream"]))
         down.setPlaceholderText("名称，逗号分隔")
         row3.addWidget(down)
         row3.addStretch()
@@ -183,16 +169,16 @@ class NodeEditor(QWidget):
     def get_nodes(self):
         result = []
         for nd in self._nodes:
-            result.append({
-                "name": nd["name"].text().strip(),
-                "type": nd["type"].value(),
-                "inventory": nd["inventory"].value(),
-                "lead_time": nd["lead_time"].value(),
-                "capacity": nd["capacity"].value(),
-                "cost_index": nd["cost_index"].value(),
-                "upstream": _parse_refs(nd["upstream"].text()),
-                "downstream": _parse_refs(nd["downstream"].text()),
-            })
+            result.append(build_node(
+                name=nd["name"].text().strip(),
+                type=nd["type"].value(),
+                inventory=nd["inventory"].value(),
+                lead_time=nd["lead_time"].value(),
+                capacity=nd["capacity"].value(),
+                cost_index=nd["cost_index"].value(),
+                upstream=parse_refs(nd["upstream"].text()),
+                downstream=parse_refs(nd["downstream"].text()),
+            ))
         return result
 
     def set_nodes(self, nodes):
@@ -202,9 +188,6 @@ class NodeEditor(QWidget):
             nd["card"].deleteLater()
         for n in nodes:
             self.add_node(n)
-
-    def clear(self):
-        self.set_nodes([])
 
 
 class EventPage(QWidget):

@@ -87,7 +87,7 @@ _SCENARIO_EXTRACTION_RAW = """你是一位供应链建模专家。用户会给�
   - type：必须是 __NODE_ENUM__ 之一
   - inventory：初始库存水平，0~100 的整数
   - lead_time：交货周期，0~10 的整数
-  - capacity：产能上限，1~200 的整数
+  - capacity：产能上限，0~200 的整数
   - cost_index：成本指数，0~100 的整数
   - upstream / downstream：上下游节点名称列表（用节点 name 引用，没有则给空列表）
 - initial_inventory：全链初始库存水平，0~100 的整数。
