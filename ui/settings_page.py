@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -26,7 +25,14 @@ from llm.config import (
     persist_vendor_state,
 )
 from ui.ai_worker import run_ai_task
-from ui.styles import *
+from ui.scroll import SmoothScrollArea
+from ui.styles import (
+    PAD_LG,
+    PAD_MD,
+    PAD_SM,
+    PAD_XL,
+    settings_status_qss,
+)
 from ui.widgets import (
     Caption,
     Card,
@@ -50,12 +56,12 @@ class SettingsPage(QWidget):
 
     def _build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, PAD_XL, 0, PAD_XL)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(PAD_LG)
 
         # --- 页头（与「项目列表」一致，保存为页面级主操作） ---
         hdr = QHBoxLayout()
-        hdr.setContentsMargins(PAD_XL, 0, PAD_XL, 0)
+        hdr.setContentsMargins(PAD_XL, PAD_XL, PAD_XL, 0)
         hdr.addWidget(Title("设置", 18))
         hdr.addStretch()
         self._save_btn = PrimaryBtn("保存配置")
@@ -63,13 +69,11 @@ class SettingsPage(QWidget):
         hdr.addWidget(self._save_btn)
         layout.addLayout(hdr)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll = SmoothScrollArea()
 
         inner = QWidget()
         il = QVBoxLayout(inner)
-        il.setContentsMargins(PAD_XL, 0, PAD_XL, 0)
+        il.setContentsMargins(PAD_XL, PAD_SM, PAD_XL, PAD_XL)
         il.setSpacing(PAD_SM)
 
         card = Card()
@@ -198,9 +202,7 @@ class SettingsPage(QWidget):
 
     def _set_status(self, text: str, is_error: bool = False):
         self._status.setText(text)
-        self._status.setStyleSheet(
-            f"color:{COLOR_RED if is_error else COLOR_GREEN};"
-        )
+        self._status.setStyleSheet(settings_status_qss(is_error))
         self._status.setVisible(bool(text))
 
     def _clear_status(self, *_args):

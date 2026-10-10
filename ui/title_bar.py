@@ -8,21 +8,16 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QCursor, QMouseEvent, QPainter, QPen, QColor
 
-from ui.styles import BG_PAGE, BG_SIDEBAR, BORDER, SIDEBAR_W, TEXT_PRIMARY, TEXT_MUTED, TEXT_ON_DARK
+from ui.styles import (
+    BG_PAGE, BG_SIDEBAR, BORDER, SIDEBAR_W, TEXT_PRIMARY, TEXT_MUTED, TEXT_ON_DARK,
+    title_brand_qss,
+)
 
 TITLE_BAR_H = 36
 
 # macOS 红绿灯：单颗直径与组内间距，按钮组宽度由这两个常量推算
 MAC_BTN_SIZE = 12
 MAC_BTN_SPACING = 8
-
-
-def _brand_qss(color: str) -> str:
-    """标题栏品牌标签样式。"""
-    return (
-        f"font-family:'JetBrains Mono';font-size:12px;"
-        f"font-weight:700;color:{color};letter-spacing:1px;"
-    )
 
 # 平台检测：环境变量 PRISM_TITLEBAR_STYLE 可强制指定 "macos" / "windows"
 _forced = os.environ.get("PRISM_TITLEBAR_STYLE", "").lower()
@@ -224,7 +219,7 @@ class TitleBar(QWidget):
             for btn in self._win_buttons:
                 btn.set_active(active)
         c = TEXT_PRIMARY if active else TEXT_MUTED
-        self._brand_label.setStyleSheet(_brand_qss(c))
+        self._brand_label.setStyleSheet(title_brand_qss(c))
         if active:
             self._poll_timer.stop()
             self._apply_hover(None)  # 交还给正常事件通道
@@ -259,7 +254,7 @@ class TitleBar(QWidget):
         self._mac_buttons = [close_btn, min_btn, max_btn]
 
         title = QLabel("PRISM")
-        title.setStyleSheet(_brand_qss(TEXT_PRIMARY))
+        title.setStyleSheet(title_brand_qss(TEXT_PRIMARY))
         title.setAlignment(Qt.AlignCenter)
 
         layout.addWidget(left)
@@ -277,7 +272,7 @@ class TitleBar(QWidget):
 
     def _build_windows(self, layout):
         brand = QLabel("PRISM")
-        brand.setStyleSheet(_brand_qss(TEXT_PRIMARY))
+        brand.setStyleSheet(title_brand_qss(TEXT_PRIMARY))
         brand.setAlignment(Qt.AlignCenter)
         self._brand_label = brand
 

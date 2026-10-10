@@ -178,6 +178,21 @@ class ProcessPageTests(unittest.TestCase):
         self.assertEqual(heal(has_checkpoint=False, has_data=False), "draft")
 
 
+class WorkspaceNavActionTests(QtDbTestCase):
+    """Step3 导航主动作跟随仿真页状态：文案与可用性同源。"""
+
+    def test_nav_mirrors_simulation_action_state(self) -> None:
+        w = self.track(MainWindow())
+        w._go(1)
+        w._process._step = 2
+        w._process._smp._set_action("⏸ 暂停")
+        self.assertEqual(w._process._next.text(), "⏸ 暂停")
+        w._process._smp._set_action("↺ 恢复仿真")
+        self.assertEqual(w._process._next.text(), "↺ 恢复仿真")
+        w._process._smp._set_action("✓ 已完成", False)
+        self.assertFalse(w._process._next.isEnabled())
+
+
 class SimulationHistorySpeechTests(QtDbTestCase):
     """发言回填回归：重开项目时日志须从 state_json 还原行为体发言。"""
 

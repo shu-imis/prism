@@ -3,9 +3,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QScrollArea,
     QSlider,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -18,7 +16,15 @@ from db.models import ProjectRepository, invalidate_simulation_results
 from llm.analysis import generate_agent_config
 from llm.config import build_llm_client
 from ui.ai_worker import run_ai_task_with_button
-from ui.styles import *
+from ui.scroll import ChainingTextEdit, SmoothScrollArea
+from ui.styles import (
+    PAD_MD,
+    PAD_SM,
+    PAD_XL,
+    TEXT_PRIMARY,
+    mono_value_qss,
+    role_badge_qss,
+)
 from ui.widgets import (
     Caption,
     Card,
@@ -27,7 +33,6 @@ from ui.widgets import (
     GhostBtn,
     Input,
     NumberInput,
-    PrimaryBtn,
     SegmentedControl,
     Title,
 )
@@ -51,13 +56,11 @@ class PersonaPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll = SmoothScrollArea()
 
         inner = QWidget()
         self._il = QVBoxLayout(inner)
-        self._il.setContentsMargins(0, 0, PAD_XL, 0)
+        self._il.setContentsMargins(PAD_XL, PAD_XL, PAD_XL, PAD_XL)
         self._il.setSpacing(PAD_SM)
 
         card = Card()
@@ -91,13 +94,6 @@ class PersonaPage(QWidget):
 
         self._il.addStretch()
 
-        br = QHBoxLayout()
-        br.addStretch()
-        self._save_btn = PrimaryBtn("保存并开始仿真 →")
-        self._save_btn.clicked.connect(self._save)
-        br.addWidget(self._save_btn)
-        self._il.addLayout(br)
-
         scroll.setWidget(inner)
         layout.addWidget(scroll)
 
@@ -107,9 +103,7 @@ class PersonaPage(QWidget):
         hdr = QHBoxLayout()
         hdr.addWidget(Title(tmpl["name"], 13))
         role = Caption(tmpl["role"])
-        role.setStyleSheet(
-            f"font-size:11px;color:{TEXT_MUTED};border:1px solid {BORDER};padding:1px 8px;"
-        )
+        role.setStyleSheet(role_badge_qss())
         hdr.addWidget(role)
         hdr.addStretch()
         card.add_layout(hdr)
@@ -127,9 +121,7 @@ class PersonaPage(QWidget):
         activity.setFixedWidth(140)
         activity_value = QLabel(f"{activity.value()}%")
         activity_value.setFixedWidth(40)
-        activity_value.setStyleSheet(
-            f"font-family:'JetBrains Mono';font-size:12px;color:{TEXT_PRIMARY};"
-        )
+        activity_value.setStyleSheet(mono_value_qss(12, TEXT_PRIMARY))
         activity.valueChanged.connect(lambda v, lbl=activity_value: lbl.setText(f"{v}%"))
         row.addWidget(activity)
         row.addWidget(activity_value)
@@ -143,7 +135,7 @@ class PersonaPage(QWidget):
         card.add_layout(row)
 
         card.add(QLabel("角色画像"))
-        profile = QTextEdit()
+        profile = ChainingTextEdit()
         profile.setPlainText(tmpl["profile"])
         profile.setMaximumHeight(90)
         card.add(profile)

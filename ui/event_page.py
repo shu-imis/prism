@@ -8,9 +8,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QScrollArea,
     QSizePolicy,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -31,7 +29,14 @@ from db.models import KnowledgeRepository, ProjectRepository, invalidate_simulat
 from llm.analysis import extract_scenario_from_docs
 from llm.config import build_llm_client
 from ui.ai_worker import run_ai_task_with_button
-from ui.styles import *
+from ui.scroll import ChainingTextEdit, SmoothScrollArea
+from ui.styles import (
+    PAD_MD,
+    PAD_SM,
+    PAD_XL,
+    PAD_XS,
+    hint_qss,
+)
 from ui.widgets import (
     Caption,
     Card,
@@ -41,7 +46,6 @@ from ui.widgets import (
     GhostBtn,
     Input,
     NumberInput,
-    PrimaryBtn,
     SecondaryBtn,
     SegmentedControl,
     Title,
@@ -215,13 +219,11 @@ class EventPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll = SmoothScrollArea()
 
         inner = QWidget()
         inner_layout = QVBoxLayout(inner)
-        inner_layout.setContentsMargins(0, 0, PAD_XL, 0)
+        inner_layout.setContentsMargins(PAD_XL, PAD_XL, PAD_XL, PAD_XL)
         inner_layout.setSpacing(PAD_SM)
 
         card = Card()
@@ -236,7 +238,7 @@ class EventPage(QWidget):
         card.add(self._industry)
 
         card.add(QLabel("供应链背景"))
-        self._bg = QTextEdit()
+        self._bg = ChainingTextEdit()
         self._bg.setPlaceholderText("描述供应链背景、结构和当前运行状况……")
         self._bg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         card.add(self._bg)
@@ -301,10 +303,6 @@ class EventPage(QWidget):
 
         inner_layout.addWidget(param_card)
         inner_layout.addStretch()
-
-        self._save_btn = PrimaryBtn("保存并配置行为体性格 →")
-        self._save_btn.clicked.connect(self._save)
-        inner_layout.addWidget(self._save_btn)
 
         scroll.setWidget(inner)
         layout.addWidget(scroll)
@@ -415,9 +413,9 @@ class EventPage(QWidget):
         title = QLabel(
             f"知识库（供仿真检索）：{len(by_source)} 个文档 · {len(chunks)} 个分块"
         )
-        title.setStyleSheet(f"font-size:11px;color:{TEXT_MUTED};")
+        title.setStyleSheet(hint_qss())
         header.addWidget(title)
-        clear_btn = GhostBtn("清空知识库")
+        clear_btn = DangerBtn("清空知识库")
         clear_btn.clicked.connect(self._clear_knowledge_base)
         header.addWidget(clear_btn)
         header.addStretch()

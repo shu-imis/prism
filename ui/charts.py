@@ -23,12 +23,16 @@ from ui.styles import (
     CHART_PURPLE,
     CHART_RED,
     CHART_TEAL,
-    COLOR_RED,
     PAD_MD,
     PAD_SM,
     TEXT_MUTED,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
+    legend_dot_qss,
+    legend_text_qss,
+    swimlane_cell_qss,
+    swimlane_header_qss,
+    swimlane_name_qss,
 )
 from ui.widgets import TipLabel, clear_layout
 
@@ -270,9 +274,7 @@ class SwimlaneGrid(QWidget):
                 tip="该周期触发关键事件" if has_event else "",
             )
             header.setFont(mono)
-            header.setStyleSheet(
-                f"color:{COLOR_RED if has_event else TEXT_MUTED};"
-            )
+            header.setStyleSheet(swimlane_header_qss(has_event))
             header.setAlignment(Qt.AlignCenter)
             header.setFixedHeight(14)
             header.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -282,7 +284,7 @@ class SwimlaneGrid(QWidget):
         # 每个行为体一行
         for row, tmpl in enumerate(AGENT_TEMPLATES, start=1):
             name = QLabel(tmpl["name"])
-            name.setStyleSheet(f"font-size:11px;color:{TEXT_SECONDARY};")
+            name.setStyleSheet(swimlane_name_qss())
             name.setFixedWidth(76)  # 最长名「原材料供应商」6 字需 ~70px
             grid.addWidget(name, row, 0)
             for col, state in enumerate(rounds, start=1):
@@ -301,11 +303,8 @@ class SwimlaneGrid(QWidget):
                 cell.setFixedHeight(_CELL_H)
                 cell.setMinimumWidth(24)
                 cell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-                if tip:
-                    color = ACTION_COLORS.get(action, CHART_NEUTRAL)
-                    cell.setStyleSheet(f"background:{color};")
-                else:
-                    cell.setStyleSheet("background:transparent;")
+                color = ACTION_COLORS.get(action, CHART_NEUTRAL) if tip else ""
+                cell.setStyleSheet(swimlane_cell_qss(color))
                 grid.addWidget(cell, row, col)
 
         self._layout.addLayout(grid)
@@ -315,10 +314,10 @@ class SwimlaneGrid(QWidget):
         legend.setSpacing(PAD_MD)
         for action, color in ACTION_COLORS.items():
             dot = QLabel("■")
-            dot.setStyleSheet(f"color:{color};font-size:10px;")
+            dot.setStyleSheet(legend_dot_qss(color))
             legend.addWidget(dot)
             text = QLabel(ACTION_LABELS[action])
-            text.setStyleSheet(f"font-size:10px;color:{TEXT_MUTED};")
+            text.setStyleSheet(legend_text_qss())
             legend.addWidget(text)
         legend.addStretch()
         self._layout.addLayout(legend)
