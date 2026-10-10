@@ -16,9 +16,6 @@ def to_json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, sort_keys=True)
 
 
-_PARSE_FAILED = object()  # from_json 的解析失败哨兵，供 is_valid_json 复用
-
-
 def from_json(text: str | None, default: Any) -> Any:
     if not text:
         return default
@@ -29,11 +26,10 @@ def from_json(text: str | None, default: Any) -> Any:
         return default
 
 
-def is_valid_json(text: str | None) -> bool:
-    """JSON 是否可解析（空值视为可解析），供 UI 标记损坏数据。"""
-    if not text:
-        return True
-    return from_json(text, _PARSE_FAILED) is not _PARSE_FAILED
+def from_json_object(text: str | None) -> dict[str, Any]:
+    """解析 JSON 对象字段；无法解析或类型不符时降级为空对象。"""
+    value = from_json(text, {})
+    return value if isinstance(value, dict) else {}
 
 
 # 单世界仿真在 simulations 表中的持久化锚点名称
@@ -54,7 +50,12 @@ class Project:
 
     @property
     def scenario(self) -> dict[str, Any]:
-        return from_json(self.scenario_json, {})
+        return from_json_object(self.scenario_json)
+
+    @property
+    def scenario_intact(self) -> bool:
+        """场景 JSON 是否完好（可解析且为对象），供 UI 标记损坏数据。"""
+        return isinstance(from_json(self.scenario_json, None), dict)
 
 
 @dataclass(frozen=True)
@@ -90,7 +91,7 @@ class SimulationRound:
 
     @property
     def state(self) -> dict[str, Any]:
-        return from_json(self.state_json, {})
+        return from_json_object(self.state_json)
 
 
 @dataclass(frozen=True)
@@ -104,7 +105,7 @@ class ReportRecord:
 
     @property
     def summary(self) -> dict[str, Any]:
-        return from_json(self.summary_json, {})
+        return from_json_object(self.summary_json)
 
 
 @dataclass(frozen=True)
@@ -118,7 +119,7 @@ class Checkpoint:
 
     @property
     def engine_state(self) -> dict[str, Any]:
-        return from_json(self.engine_state_json, {})
+        return from_json_object(self.engine_state_json)
 
 
 @dataclass(frozen=True)

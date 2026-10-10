@@ -133,7 +133,7 @@ class MainWindow(QMainWindow):
 
     def _on_project_deleted(self, pid: int):
         # 被删的正是工作区当前打开的项目：重置工作区，避免停留在失效项目的页面
-        if self._process._pid == pid:
+        if self._process.current_project_id == pid:
             self._process.reset()
             if self._stack.currentIndex() == 1:
                 self._go(0)
@@ -145,8 +145,7 @@ class MainWindow(QMainWindow):
         # 模块级列表，防止 GC 析构运行中的 QThread；不 wait() 阻塞关窗，
         # 进程自然退出，请求跑完即被回收
         workers = list(self._process.iter_ai_workers())
-        if hasattr(self._settings, "_ai_workers"):
-            workers += self._settings._ai_workers
+        workers += self._settings.iter_ai_workers()
         for worker in workers:
             try:
                 worker.succeeded.disconnect()

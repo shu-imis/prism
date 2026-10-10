@@ -33,14 +33,9 @@ from ui.styles import (
     workspace_step_tag_qss,
 )
 from ui.widgets import Divider, PrimaryBtn, SecondaryBtn, StatusDot
-from db.models import (
-    CheckpointRepository,
-    ProjectRepository,
-    ReportRepository,
-    SimulationRepository,
-    SimulationRoundRepository,
-)
+from db.models import ProjectRepository, ReportRepository
 from report.exporter import ReportExporter
+from services.workspace import WorkspaceService
 
 
 class ProcessPage(QWidget):
@@ -51,6 +46,7 @@ class ProcessPage(QWidget):
         self._pid = None
         self._step = 0
         self._saved_steps: set[int] = set()
+        self._ws = WorkspaceService()
         self._build()
         self._wire()
 
@@ -257,12 +253,11 @@ class ProcessPage(QWidget):
         if self._step == 2:
             if self._smp.is_running():
                 return STATUS_LABELS["running"], STATUS_COLORS["running"]
-            if self._pid:
-                project = ProjectRepository().get_by_id(self._pid)
-                if project and project.status == "interrupted":
-                    return STATUS_LABELS["interrupted"], STATUS_COLORS["interrupted"]
-                if project and project.status == "completed":
-                    return STATUS_LABELS["completed"], STATUS_COLORS["completed"]
+            status = self._ws.status(self._pid) if self._pid else None
+            if status == "interrupted":
+                return STATUS_LABELS["interrupted"], STATUS_COLORS["interrupted"]
+            if status == "completed":
+                return STATUS_LABELS["completed"], STATUS_COLORS["completed"]
             return STATUS_LABELS["draft"], TEXT_MUTED
         if self._is_sim_done():
             return STATUS_LABELS["completed"], STATUS_COLORS["completed"]
@@ -272,25 +267,10 @@ class ProcessPage(QWidget):
         self._pid = pid
         self._step = 0
         # 先确定各步骤完成态，再刷新状态指示
-        reports = ReportRepository().list_by_project(pid)
-        project = ProjectRepository().get_by_id(pid)
-        # Step 4 的数据可从轮次重建，故有数据 = 曾有仿真运行过
-        has_data = bool(reports) or self._has_rounds(pid)
+        project = self._ws.load_workspace(pid)
         self._saved_steps = {0}
         if project and project.scenario.get("agents_config"):
             self._saved_steps.add(1)
-        if project and project.status == "running":
-            # 重启后不存在仍在运行的仿真，running 必为陈旧状态；
-            # 中断的仿真同样每轮落库，须以检查点区分「中断」与「跑完」
-            stale = self._heal_stale_status(
-                has_checkpoint=bool(CheckpointRepository().latest_for_project(pid)),
-                has_data=has_data,
-            )
-            ProjectRepository().update_scenario(pid, dict(project.scenario), status=stale)
-        elif project and project.status == "interrupted":
-            # 检查点已丢失则回退为草稿
-            if not CheckpointRepository().latest_for_project(pid):
-                ProjectRepository().update_scenario(pid, dict(project.scenario), status="draft")
         self._update()
         self._log.clear()
         self._ep.load_project(pid)
@@ -299,32 +279,16 @@ class ProcessPage(QWidget):
             self._smp.load_project(pid)    # 预加载 Step 3 历史
             self._rp.load_project(pid)     # 预加载 Step 4 报告
 
-    @staticmethod
-    def _heal_stale_status(has_checkpoint: bool, has_data: bool) -> str:
-        """陈旧 running 状态的治愈判据。
-
-        有检查点说明仿真被中断（可断点恢复）；无检查点但有轮次/报告数据
-        说明已跑完；两者皆无则回到草稿。
-        """
-        if has_checkpoint:
-            return "interrupted"
-        return "completed" if has_data else "draft"
-
-    @staticmethod
-    def _has_rounds(pid) -> bool:
-        """主仿真是否存在轮次数据。"""
-        main_record = SimulationRepository().get_main(pid)
-        return bool(
-            main_record
-            and SimulationRoundRepository().list_by_simulation(main_record.id)
-        )
-
     def _is_sim_done(self) -> bool:
         """仿真是否已完成（以 DB 项目状态为唯一真相来源）。"""
         if not self._pid:
             return False
-        project = ProjectRepository().get_by_id(self._pid)
-        return project is not None and project.status == "completed"
+        return self._ws.status(self._pid) == "completed"
+
+    @property
+    def current_project_id(self) -> int | None:
+        """当前打开的项目 id（供主窗口联动删除判断）。"""
+        return self._pid
 
     def stop_worker(self):
         """安全停止仿真工作线程，供主窗口关闭时调用。"""
