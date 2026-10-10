@@ -9,7 +9,7 @@ import difflib
 import random
 import re
 import time
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from config import app_config
 from core.action_feed import SEED_ACTION, ActionFeed, ActionRecord
@@ -20,10 +20,15 @@ from core.events import EventDetector
 from core.scenario_parser import Scenario
 from core.world_state import AgentSnapshot, NodeState, WorldState
 from core import clamp, clamp_float
-from db.models import Checkpoint, CheckpointRepository, KnowledgeRepository, SimulationRoundRepository
-from llm.client import LLMClient
-from llm.config import build_llm_client
-from llm.prompts import AGENT_RESPONSE_SYSTEM
+
+if TYPE_CHECKING:
+    from db.models import (
+        Checkpoint,
+        CheckpointRepository,
+        KnowledgeRepository,
+        SimulationRoundRepository,
+    )
+    from llm.client import LLMClient
 
 AGENT_NODE_TYPES: dict[int, tuple[str, ...]] = {
     i: (key,) for i, (key, _) in enumerate(NODE_TYPE_DEFS, start=1)
@@ -154,7 +159,7 @@ class SimulationRecoverableError(RuntimeError):
 class SimulationEngine:
     """管理单一世界、多轮、多行为体的真实 LLM 推演生命周期。"""
 
-    def __init__(self, llm_client: LLMClient | None = None, random_seed: int = 42):
+    def __init__(self, llm_client: LLMClient, random_seed: int = 42):
         self.state = SimulationState()
         self.llm_client = llm_client
         self.random_seed = random_seed
@@ -162,6 +167,7 @@ class SimulationEngine:
         self._progress_callback: Callable[[int, int, str], None] = None
         self._round_callback: RoundCallback | None = None
         self._resume_payload: dict[str, Any] | None = None
+        self._system_prompt = ""
         # 事件检测器在 _run_simulation 中创建，供检查点续传
         self._detector: EventDetector | None = None
 
@@ -170,6 +176,7 @@ class SimulationEngine:
         agents: list[Agent],
         scenario: Scenario,
         *,
+        system_prompt: str,
         seed_events: list[dict[str, Any]] | None = None,
         max_rounds: int | None = None,
         project_id: int | None = None,
@@ -198,6 +205,7 @@ class SimulationEngine:
         self.state.knowledge_repository = knowledge_repository
         self.state.resume_checkpoint = resume_checkpoint
         self.state.round_timeout = round_timeout or app_config.sim.round_timeout
+        self._system_prompt = system_prompt
         self._resume_payload = resume_checkpoint.engine_state if resume_checkpoint else None
         self._rng = random.Random(self.random_seed)
 
@@ -438,11 +446,6 @@ class SimulationEngine:
                 ]
             )
 
-    def _ensure_llm_client(self) -> LLMClient:
-        if self.llm_client is None:
-            self.llm_client = build_llm_client()
-        return self.llm_client
-
     def _initial_world_state(self, agents: list[Agent]) -> WorldState:
         scenario = self.state.scenario
         node_states = self._initial_node_states()
@@ -535,7 +538,7 @@ class SimulationEngine:
         other_agents = "、".join(a.name for a in agents if a.id != agent.id)
         if knowledge_context is None:
             knowledge_context = self._retrieve_knowledge_context(agent, state)
-        system_prompt = AGENT_RESPONSE_SYSTEM.format(
+        system_prompt = self._system_prompt.format(
             agent_profile=agent.profile,
             cycle=state.simulated_hour,
             inventory_level=state.inventory_level,
@@ -566,7 +569,7 @@ class SimulationEngine:
                 "Return JSON only.",
             ]
         )
-        data = self._ensure_llm_client().chat_json(
+        data = self.llm_client.chat_json(
             system_prompt, user_message, temperature=app_config.llm.decision_temperature
         )
         required_fields = {

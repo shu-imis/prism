@@ -20,7 +20,7 @@ from db.models import (
     KnowledgeRepository,
 )
 from llm.client import LLMClient, LLMVendor, VendorSettings
-from tests.helpers import make_always_active_agents, make_fake_llm_client
+from tests.helpers import configure_engine, make_always_active_agents, make_fake_llm_client
 
 
 class SimulationEngineTests(unittest.TestCase):
@@ -56,7 +56,8 @@ class SimulationEngineTests(unittest.TestCase):
         engine = SimulationEngine(llm_client=make_fake_llm_client(), random_seed=7)
         round_payloads = []
         engine.set_round_callback(lambda state, messages: round_payloads.append((state, messages)))
-        engine.configure(
+        configure_engine(
+            engine,
             make_always_active_agents(),
             scenario,
             max_rounds=2,
@@ -84,7 +85,8 @@ class SimulationEngineTests(unittest.TestCase):
             project = project_repo.create("Demo", {"industry": "electronics"})
             simulation_record = simulation_repo.get_or_create_main(project.id)
             engine = SimulationEngine(llm_client=make_fake_llm_client(), random_seed=3)
-            engine.configure(
+            configure_engine(
+                engine,
                 make_always_active_agents(),
                 ScenarioParser.parse("Demo", "电子制造", "供应链压力传导", initial_inventory=75, baseline_cost=55),
                 max_rounds=2,
@@ -124,7 +126,8 @@ class SimulationEngineTests(unittest.TestCase):
         engine = SimulationEngine(llm_client=client, random_seed=1)
         payloads = []
         engine.set_round_callback(lambda state, messages: payloads.append(messages))
-        engine.configure(
+        configure_engine(
+            engine,
             make_always_active_agents(),
             ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
             max_rounds=1,
@@ -156,7 +159,8 @@ class SimulationEngineTests(unittest.TestCase):
                 transport=failing_transport,
             )
             engine = SimulationEngine(llm_client=client, random_seed=1)
-            engine.configure(
+            configure_engine(
+                engine,
                 make_always_active_agents(),
                 ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
                 max_rounds=1,
@@ -184,7 +188,8 @@ class SimulationEngineTests(unittest.TestCase):
             scenario = ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55)
 
             first_engine = SimulationEngine(llm_client=make_fake_llm_client(), random_seed=1)
-            first_engine.configure(
+            configure_engine(
+                first_engine,
                 make_always_active_agents(),
                 scenario,
                 max_rounds=1,
@@ -210,7 +215,8 @@ class SimulationEngineTests(unittest.TestCase):
             checkpoint = checkpoint_repo.latest_for_project(project.id)
 
             second_engine = SimulationEngine(llm_client=make_fake_llm_client(), random_seed=1)
-            second_engine.configure(
+            configure_engine(
+                second_engine,
                 make_always_active_agents(),
                 scenario,
                 max_rounds=5,
@@ -234,7 +240,8 @@ class SimulationEngineTests(unittest.TestCase):
         )
         payloads = []
         engine.set_round_callback(lambda state, messages: payloads.append(messages))
-        engine.configure(
+        configure_engine(
+            engine,
             make_always_active_agents(),
             ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
             max_rounds=1,
@@ -270,7 +277,8 @@ class SimulationEngineTests(unittest.TestCase):
         )
         payloads = []
         engine.set_round_callback(lambda state, messages: payloads.append(messages))
-        engine.configure(
+        configure_engine(
+            engine,
             make_always_active_agents(),
             ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
             max_rounds=1,
@@ -304,7 +312,8 @@ class SimulationEngineTests(unittest.TestCase):
             first_engine.set_round_callback(
                 lambda state, messages: first_engine.abort() if state.round == 1 else None
             )
-            first_engine.configure(
+            configure_engine(
+                first_engine,
                 make_always_active_agents(),
                 scenario,
                 max_rounds=3,
@@ -324,7 +333,8 @@ class SimulationEngineTests(unittest.TestCase):
             self.assertNotIn("current_rounds", engine_state)  # 历史轮次查 simulation_rounds 表
 
             second_engine = SimulationEngine(llm_client=make_fake_llm_client(), random_seed=1)
-            second_engine.configure(
+            configure_engine(
+                second_engine,
                 make_always_active_agents(),
                 scenario,
                 max_rounds=3,
@@ -357,7 +367,8 @@ class SimulationEngineTests(unittest.TestCase):
             first_engine.set_round_callback(
                 lambda state, messages: first_engine.abort() if state.round == 1 else None
             )
-            first_engine.configure(
+            configure_engine(
+                first_engine,
                 make_always_active_agents(),
                 scenario,
                 max_rounds=3,
@@ -373,7 +384,8 @@ class SimulationEngineTests(unittest.TestCase):
             self.assertEqual(checkpoint.engine_state["detector"]["supplier_delay_count"], 1)
 
             second_engine = SimulationEngine(llm_client=make_fake_llm_client(), random_seed=1)
-            second_engine.configure(
+            configure_engine(
+                second_engine,
                 make_always_active_agents(),
                 scenario,
                 max_rounds=3,
@@ -407,7 +419,8 @@ class SimulationEngineTests(unittest.TestCase):
         engine = SimulationEngine(llm_client=client, random_seed=1)
         payloads = []
         engine.set_round_callback(lambda state, messages: payloads.append(messages))
-        engine.configure(
+        configure_engine(
+            engine,
             make_always_active_agents(),
             ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
             max_rounds=1,
@@ -449,7 +462,8 @@ class SimulationEngineTests(unittest.TestCase):
             transport=fake_transport,
         )
         engine = SimulationEngine(llm_client=client, random_seed=7)
-        engine.configure(
+        configure_engine(
+            engine,
             make_always_active_agents(),
             ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
             max_rounds=2,
@@ -486,7 +500,8 @@ class SimulationEngineTests(unittest.TestCase):
             transport=fake_transport,
         )
         engine = SimulationEngine(llm_client=client, random_seed=7)
-        engine.configure(
+        configure_engine(
+            engine,
             make_always_active_agents(),
             ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
             seed_events=[{"content": "港口罢工导致物流中断", "cycle": 2}],
@@ -530,7 +545,8 @@ class SimulationEngineTests(unittest.TestCase):
                 transport=fake_transport,
             )
             engine = SimulationEngine(llm_client=client, random_seed=1)
-            engine.configure(
+            configure_engine(
+                engine,
                 make_always_active_agents(),
                 ScenarioParser.parse("Demo", "电子制造", "供应链压力 原材料 交付", initial_inventory=75, baseline_cost=55),
                 max_rounds=1,
@@ -572,7 +588,8 @@ class SimulationEngineTests(unittest.TestCase):
         engine = SimulationEngine(llm_client=client, random_seed=1)
         payloads = []
         engine.set_round_callback(lambda state, messages: payloads.append(messages))
-        engine.configure(
+        configure_engine(
+            engine,
             make_always_active_agents(),
             ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
             max_rounds=1,
@@ -593,7 +610,8 @@ class SimulationEngineTests(unittest.TestCase):
         """观察层：同一行为体相邻轮次内容高度相似时折叠旧条目为「持续中」。"""
         engine = SimulationEngine(llm_client=make_fake_llm_client(), random_seed=1)
         agents = make_always_active_agents()
-        engine.configure(
+        configure_engine(
+            engine,
             agents,
             ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
             max_rounds=1,
@@ -651,7 +669,8 @@ class SimulationEngineTests(unittest.TestCase):
             transport=fake_transport,
         )
         engine = SimulationEngine(llm_client=client, random_seed=1)
-        engine.configure(
+        configure_engine(
+            engine,
             make_always_active_agents(),
             ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
             max_rounds=1,

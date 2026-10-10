@@ -1,7 +1,6 @@
 """仿真运行"""
 
 import html
-import logging
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
@@ -12,24 +11,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import app_config, DB_PATH
+from config import app_config
 from core.agent_factory import AgentFactory
 from core.constants import METRICS
-from core.scenario_parser import Scenario
 from core.simulation_engine import SimulationEngine, SimulationRecoverableError
 from core.text_utils import normalize_speech
-from db.database import Database
-from db.models import (
-    CheckpointRepository,
-    KnowledgeRepository,
-    ProjectRepository,
-    SimulationRepository,
-    SimulationRoundRepository,
-    invalidate_simulation_results,
-)
-from llm.analysis import analyze_evolution
-from llm.config import active_vendor_label, build_llm_client, get_active_vendor_settings
-from report.generator import ReportGenerator
+from llm.config import active_vendor_label, get_active_vendor_settings
+from services.simulation import SimulationRun, SimulationService
 from ui.scroll import ChainingTextEdit
 from ui.styles import (
     PAD_SM,
@@ -47,8 +35,6 @@ from ui.widgets import (
     SecondaryBtn,
     Title,
 )
-
-_logger = logging.getLogger(__name__)
 
 
 def _format_speech_line(agent_name: str, action_type: str, reaction_to: str, content: str) -> str:
@@ -141,7 +127,6 @@ class SimWorker(QThread):
             self.round_done.emit(payload)
 
     def run(self):
-        db = None
         try:
             # 引擎引用先行暴露：主线程的 cancel()/pause() 可能早于 DB 读取到达，
             # 否则竞态窗口内的取消会被丢弃
@@ -150,73 +135,24 @@ class SimWorker(QThread):
             if self._cancelled:
                 engine.abort()
 
-            db = Database(DB_PATH)
-            proj = ProjectRepository(db).get_by_id(self.pid)
-            scenario_dict = proj.scenario if proj else {}
-            sc = Scenario.from_dict(scenario_dict)
-            sim_record = (
-                SimulationRepository(db).get_or_create_main(self.pid)
-                if self.pid
-                else None
+            run = SimulationRun(
+                self.pid,
+                self.llm,
+                self.rounds,
+                engine,
+                checkpoint=self._checkpoint,
+                on_progress=lambda c, t, m: self.progress.emit(c, t, m),
+                on_round=self._relay_round,
             )
-            round_repo = SimulationRoundRepository(db)
-            checkpoint_repo = CheckpointRepository(db)
-
-            agents = AgentFactory.create_all()
-            AgentFactory.apply_overrides(agents, scenario_dict.get("agents_config"))
-            seed_events = scenario_dict.get("seed_events", [])
-
-            engine.configure(
-                agents, sc,
-                seed_events=seed_events,
-                max_rounds=self.rounds,
-                project_id=self.pid,
-                simulation_record=sim_record,
-                round_repository=round_repo,
-                checkpoint_repository=checkpoint_repo,
-                knowledge_repository=KnowledgeRepository(db) if self.pid else None,
-                resume_checkpoint=self._checkpoint,
-            )
-            engine.set_progress_callback(
-                lambda c, t, m: self.progress.emit(c, t, m)
-            )
-            engine.set_round_callback(self._relay_round)
-
-            results = engine.run()
+            results = run.run()
             # 发射结果前检查是否被取消：取消则直接返回，让 QThread.finished 自然触发清理
             if self._cancelled:
                 return
-            gen = ReportGenerator(
-                proj.name if proj else "",
-                sc.background,
-            )
-            gen.set_simulation_result(results)
-            report = gen.generate()
-            # Step4 全链路 AI：生成叙述式综合分析；失败则降级为纯公式报告
-            # （ai_analysis 留空，Step4 页面可手动重新生成）
-            try:
-                report.ai_analysis = analyze_evolution(self.llm, report, results)
-            except Exception as e:
-                _logger.warning("AI 综合分析失败，报告降级为纯公式结果：%s", e)
-
-            self.succeeded.emit(self.pid, report, results)
+            self.succeeded.emit(self.pid, run.build_report(results), results)
         except SimulationRecoverableError as e:
             self.recoverable.emit(str(e))
         except Exception as e:
-            # 致命错误：清除检查点，防止反复恢复
-            if self.pid:
-                try:
-                    cleanup_db = Database(DB_PATH)
-                    try:
-                        CheckpointRepository(cleanup_db).delete_for_project(self.pid)
-                    finally:
-                        cleanup_db.close()
-                except Exception:
-                    pass
             self.failed.emit(str(e))
-        finally:
-            if db is not None:
-                db.close()
         # run() 返回后 QThread 自动发射 finished(void) 信号，由主线程的
         # _on_worker_finished 槽断开信号连接；对象在下一次 _dispose_worker 时回收。
 
@@ -232,6 +168,7 @@ class SimulationPage(QWidget):
         self._running = False
         self._worker = None
         self._signals_cleaned = False
+        self._ss = SimulationService()
         # 外部日志出口（工作区终端），由 ProcessPage 注入
         self._log_sink = None
         # 主动作状态（文案/可用性），由工作区底部导航行读取展示
@@ -382,23 +319,20 @@ class SimulationPage(QWidget):
         self._signals_cleaned = False
 
     def _load_history(self):
-        """从 DB 加载主仿真的历史轮次数据并回显到日志和指标卡。"""
+        """从 DB 装载主仿真的历史轮次数据并回显到日志和指标卡。"""
         if not self._pid:
             return
-        main_record = SimulationRepository().get_main(self._pid)
-        if main_record is None:
+        history = self._ss.load_history(self._pid)
+        if not history.rounds:
             return
-        rounds = SimulationRoundRepository().list_by_simulation(main_record.id)
-        if not rounds:
-            return
-        for r in rounds:
+        for r in history.rounds:
             self._log.append(
                 f"  >  [周期 {r.round_index}]  库存 {r.inventory_level:.0f}  "
                 f"成本 {r.cost_index:.0f}  服务 {r.service_level:.0%}  "
                 f"利润 {r.profit_margin:+.1%}"
             )
             self._append_history_speeches(r.state)
-        last_round = rounds[-1]
+        last_round = history.rounds[-1]
         self._mv["库存"].setText(f"{last_round.inventory_level:.1f}")
         self._mv["成本"].setText(f"{last_round.cost_index:.1f}")
         self._mv["服务水平"].setText(f"{last_round.service_level:.0%}")
@@ -406,7 +340,7 @@ class SimulationPage(QWidget):
         self._mv["交付延迟"].setText(f"{last_round.delivery_delay:.1f}")
 
         # 有检查点 = 中断态：回显历史但保留恢复入口，不标记完成
-        if CheckpointRepository().latest_for_project(self._pid):
+        if history.has_checkpoint:
             self._bar.setValue(
                 int(last_round.round_index / max(app_config.sim.max_rounds, 1) * 100)
             )
@@ -418,8 +352,7 @@ class SimulationPage(QWidget):
 
         # 完成判定与 ProcessPage._is_sim_done 同源，以 DB 项目状态为准；
         # 致命失败后可能残留轮次但状态非 completed，此时必须允许重新启动
-        project = ProjectRepository().get_by_id(self._pid)
-        if project and project.status == "completed":
+        if history.status == "completed":
             self._bar.setValue(100)
             self._st.setText("仿真已完成")
             self._st.setVisible(True)
@@ -476,7 +409,7 @@ class SimulationPage(QWidget):
         # 调用 disconnect/deleteLater 会触发 use-after-free 崩溃。
         self._dispose_worker()
 
-        llm = build_llm_client(max_retries=1)
+        llm, checkpoint = self._ss.prepare_start(self._pid)
         if llm is None:
             self.log("未找到可用的 LLM 配置，请到左侧「设置」页填写 API Key", is_error=True)
             return
@@ -486,17 +419,9 @@ class SimulationPage(QWidget):
             llm,
             app_config.sim.max_rounds,
         )
-        if self._pid:
-            cp_repo = CheckpointRepository()
-            checkpoint = cp_repo.latest_for_project(self._pid)
-            if checkpoint:
-                self._worker.set_checkpoint(checkpoint)
-                self.log("检测到检查点，从断点恢复", is_error=False)
-            else:
-                # 全新启动：清掉上次运行残留的轮次，避免轮次 upsert 跨次混杂
-                main = SimulationRepository().get_main(self._pid)
-                if main:
-                    SimulationRoundRepository().delete_for_simulation(main.id)
+        if checkpoint:
+            self._worker.set_checkpoint(checkpoint)
+            self.log("检测到检查点，从断点恢复", is_error=False)
         self._worker.progress.connect(self._on_progress)
         self._worker.round_done.connect(self._on_round)
         self._worker.succeeded.connect(self._on_succeeded)
@@ -509,13 +434,6 @@ class SimulationPage(QWidget):
 
         self._running = True
         self._set_action("⏸ 暂停")
-        if self._pid:
-            # 项目状态机：启动仿真 → running，完成 → completed（见 process_page）
-            project = ProjectRepository().get_by_id(self._pid)
-            if project and project.status != "running":
-                ProjectRepository().update_scenario(
-                    self._pid, dict(project.scenario), status="running"
-                )
         self._worker.start()
 
     def _dispose_worker(self):
@@ -574,23 +492,13 @@ class SimulationPage(QWidget):
     def _on_failed(self, msg):
         self._running = False
         self.log(msg, is_error=True)
-        if self._pid:
-            project = ProjectRepository().get_by_id(self._pid)
-            if project and project.status == "running":
-                ProjectRepository().update_scenario(
-                    self._pid, dict(project.scenario), status="draft"
-                )
+        self._ss.mark_draft(self._pid)
         self._set_action("▶ 重试")
 
     def _on_recoverable(self, msg):
         self._running = False
         self.log(msg, is_error=True)
-        if self._pid:
-            project = ProjectRepository().get_by_id(self._pid)
-            if project:
-                ProjectRepository().update_scenario(
-                    self._pid, dict(project.scenario), status="interrupted"
-                )
+        self._ss.mark_interrupted(self._pid)
         self._set_action("↺ 恢复仿真")
 
     def _on_progress(self, current, total, message):
@@ -670,7 +578,7 @@ class SimulationPage(QWidget):
             return
         self._dispose_worker()
         if self._pid:
-            invalidate_simulation_results(self._pid)
+            self._ss.clear_results(self._pid)
         self._reset()
 
     def _reset(self):

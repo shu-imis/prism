@@ -17,7 +17,7 @@ from core.text_utils import normalize_speech
 from core.world_state import KeyEvent, WorldState
 from config import AppConfig
 from llm.client import LLMClient, LLMVendor, VendorSettings
-from tests.helpers import make_always_active_agents
+from tests.helpers import configure_engine, make_always_active_agents
 
 
 class CoreModuleTests(unittest.TestCase):
@@ -240,7 +240,8 @@ class CoreModuleTests(unittest.TestCase):
             transport=fake_transport,
         )
         engine = SimulationEngine(llm_client=client, random_seed=7)
-        engine.configure(
+        configure_engine(
+            engine,
             make_always_active_agents(),
             ScenarioParser.parse("Demo", "电子制造", "供应链压力", initial_inventory=75, baseline_cost=55),
             max_rounds=2,
