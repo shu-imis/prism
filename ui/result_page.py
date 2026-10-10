@@ -15,17 +15,11 @@ from PySide6.QtWidgets import (
 )
 
 from core.constants import METRICS
-from core.world_state import WorldState
-from db.models import (
-    ProjectRepository,
-    ReportRepository,
-    SimulationRepository,
-    SimulationRoundRepository,
-)
 from llm.analysis import analyze_evolution
 from llm.config import build_llm_client
 from report.exporter import ReportExporter
-from report.generator import ReportGenerator, SimulationReport, recommendation_level
+from report.generator import SimulationReport, recommendation_level
+from services.reports import ReportService
 from ui.ai_worker import run_ai_task_with_button
 from ui.charts import MetricsChart, RadarChart, SwimlaneGrid
 from ui.scroll import SmoothScrollArea
@@ -76,6 +70,7 @@ class ResultPage(QWidget):
         self._report = None
         self._rounds = []
         self._pid = None
+        self._rs = ReportService()
         self._build()
 
     # --- 构建 UI 骨架 ---
@@ -233,48 +228,8 @@ class ResultPage(QWidget):
 
     def load_project(self, project_id):
         self._pid = project_id
-        self._rounds = self._load_rounds(project_id)
-        project = ProjectRepository().get_by_id(project_id)
-        project_name = project.name if project else ""
-
-        reports = ReportRepository().list_by_project(project_id)
-        if reports:
-            self._report = SimulationReport.from_dict(reports[0].summary)
-            if not self._report.project_name:
-                # 旧报告可能未存项目名：以当前项目名补齐，避免横幅只剩日期
-                self._report.project_name = project_name
-        elif self._rounds:
-            generator = ReportGenerator(project_name)
-            generator.set_simulation_result(self._rounds)
-            self._report = generator.generate()
-        else:
-            self._report = None
-
+        self._report, self._rounds = self._rs.load_result(project_id)
         self._render()
-
-    # --- 数据加载 ---
-
-    def _load_rounds(self, project_id):
-        main_record = SimulationRepository().get_main(project_id)
-        if main_record is None:
-            return []
-        states = []
-        for record in SimulationRoundRepository().list_by_simulation(main_record.id):
-            try:
-                state = WorldState.from_dict(record.state)
-            except Exception:
-                state = WorldState(
-                    round=record.round_index,
-                    simulated_hour=record.simulated_hour,
-                    inventory_level=record.inventory_level,
-                    cost_index=record.cost_index,
-                    delivery_delay=record.delivery_delay,
-                    service_level=record.service_level,
-                    profit_margin=record.profit_margin,
-                    resilience_score=record.resilience_score,
-                )
-            states.append(state)
-        return states
 
     # --- 渲染 ---
 
@@ -429,15 +384,10 @@ class ResultPage(QWidget):
         self._report.ai_analysis = analysis
         self._render_ai_analysis()
         self._reset_ai_btn()
-        # 落库：更新项目主报告（无则插入），AI 分析随报告持久化
+        # 落库：AI 分析随报告持久化
         if self._pid:
             try:
-                ReportRepository().save_or_update_latest(
-                    project_id=self._pid,
-                    title=f"{self._report.project_name} - 供应链演化仿真报告",
-                    markdown=ReportExporter.to_markdown(self._report, self._rounds),
-                    summary=self._report.to_dict(),
-                )
+                self._rs.persist(self._pid, self._report, self._rounds)
             except Exception:
                 pass  # 展示已成功，落库失败不影响查看
 
