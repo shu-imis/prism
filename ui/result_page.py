@@ -15,10 +15,9 @@ from PySide6.QtWidgets import (
 )
 
 from core.constants import METRICS
-from llm.analysis import analyze_evolution
-from llm.config import build_llm_client
 from report.exporter import ReportExporter
 from report.generator import SimulationReport, recommendation_level
+from services.ai import CLIENT_UNAVAILABLE_MESSAGE, analyze_evolution, prepare_client
 from services.reports import ReportService
 from ui.ai_worker import run_ai_task_with_button
 from ui.charts import MetricsChart, RadarChart, SwimlaneGrid
@@ -354,12 +353,10 @@ class ResultPage(QWidget):
     def _generate_ai_analysis(self):
         if not self._report:
             return
-        client = build_llm_client()
+        client = prepare_client()
         if client is None:
             clear_layout(self._ai_body)
-            self._ai_body.addWidget(Caption(
-                "未找到可用的 LLM 配置，请到左侧「设置」页填写 API Key"
-            ))
+            self._ai_body.addWidget(Caption(CLIENT_UNAVAILABLE_MESSAGE))
             return
         report, rounds, pid = self._report, list(self._rounds), self._pid
         run_ai_task_with_button(

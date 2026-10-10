@@ -17,6 +17,7 @@ from core.constants import METRICS
 from core.simulation_engine import SimulationEngine, SimulationRecoverableError
 from core.text_utils import normalize_speech
 from llm.config import active_vendor_label, get_active_vendor_settings
+from services.ai import CLIENT_UNAVAILABLE_MESSAGE
 from services.simulation import SimulationRun, SimulationService
 from ui.scroll import ChainingTextEdit
 from ui.styles import (
@@ -411,7 +412,7 @@ class SimulationPage(QWidget):
 
         llm, checkpoint = self._ss.prepare_start(self._pid)
         if llm is None:
-            self.log("未找到可用的 LLM 配置，请到左侧「设置」页填写 API Key", is_error=True)
+            self.log(CLIENT_UNAVAILABLE_MESSAGE, is_error=True)
             return
 
         self._worker = SimWorker(

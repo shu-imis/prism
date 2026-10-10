@@ -13,8 +13,7 @@ from config import app_config
 from core.agent import AGENT_TEMPLATES
 from core.agent_factory import AgentFactory
 from core.constants import STANCES
-from llm.analysis import generate_agent_config
-from llm.config import build_llm_client
+from services.ai import CLIENT_UNAVAILABLE_MESSAGE, generate_persona, prepare_client
 from services.workspace import WorkspaceService
 from ui.ai_worker import run_ai_task_with_button
 from ui.save_flow import SaveFlow
@@ -234,9 +233,9 @@ class PersonaPage(QWidget):
         if not scenario.get("background"):
             self.log("请先在 Step1 填写供应链背景", is_error=True)
             return
-        client = build_llm_client()
+        client = prepare_client()
         if client is None:
-            self.log("未找到可用的 LLM 配置，请到左侧「设置」页填写 API Key", is_error=True)
+            self.log(CLIENT_UNAVAILABLE_MESSAGE, is_error=True)
             return
         pid = self._pid
         run_ai_task_with_button(
@@ -244,7 +243,7 @@ class PersonaPage(QWidget):
             self._ai_btn,
             self._ai_status,
             "AI 生成中…",
-            lambda: generate_agent_config(client, scenario),
+            lambda: generate_persona(client, scenario),
             lambda result: self._on_ai_config(result, pid),
             self._on_ai_error,
         )
