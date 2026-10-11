@@ -67,12 +67,12 @@ class _MacTraffic(QPushButton):
         # 悬停时按钮「唤醒」为激活色，其余界面保持失焦灰
         fill = QColor(self._color if (self._active or self._group_hover) else MAC_INACTIVE_COLOR)
         if self.isDown():
-            fill = fill.darker(120)  # 按压加深 20%，对齐原生
+            fill = fill.darker(120)  # 按压加深 20%
         p.setPen(Qt.NoPen)
         p.setBrush(fill)
         p.drawEllipse(QRectF(0.5, 0.5, 11, 11))  # 圆心严格在 (6, 6)
         if self._group_hover:
-            p.setPen(QPen(QColor(0, 0, 0, 130), 1.25))  # 平头笔触，同系统
+            p.setPen(QPen(QColor(0, 0, 0, 130), 1.25))
             c = 6.0
             if self._symbol == "close":
                 p.drawLine(QPointF(c - 2.4, c - 2.4), QPointF(c + 2.4, c + 2.4))
@@ -121,7 +121,7 @@ class _WinButton(QPushButton):
         elif self._hover or self.isDown():
             p.fillRect(self.rect(), QColor(WIN_PRESSED_COLOR) if self.isDown() else QColor(WIN_HOVER_COLOR))
 
-        # 符号（悬停/按下时「唤醒」为激活色，其余界面保持失焦灰）
+        # 符号：悬停/按下「唤醒」为激活色
         if self._hover and self._kind == "close":
             pen_color = QColor(TEXT_ON_DARK)
         elif self._active or self._hover or self.isDown():

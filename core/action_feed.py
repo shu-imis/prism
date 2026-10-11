@@ -51,8 +51,7 @@ class ActionRecord:
 class ActionFeed:
     """单次仿真内的共享行动信息流（纯内存，随仿真结束销毁）。
 
-    可见性规则与 MiroFish 的推荐层对应：邻居行动全部可见，
-    非邻居行动仅当其影响力达到广播阈值时可见。
+    可见性规则：邻居行动全部可见，非邻居行动仅当其影响力达到广播阈值时可见。
     """
 
     def __init__(self, broadcast_influence: float = 1.5, max_rounds_kept: int = 2):

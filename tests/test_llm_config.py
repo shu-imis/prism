@@ -171,7 +171,7 @@ class LLMConfigTests(unittest.TestCase):
         sleep_mock.assert_called_once_with(7.0)
 
     def test_truncated_response_retried_with_larger_max_tokens(self) -> None:
-        """截断重试：SDK 路径报告截断时以 max_tokens=8192 重试一次（仅一次）。"""
+        """截断重试：SDK 路径报告截断时以 max_tokens=8192 放大一次，且只放大一次。"""
         client = LLMClient(
             vendors=[VendorSettings(LLMVendor.OPENAI, "m", "key")],
             max_retries=0,
@@ -180,13 +180,13 @@ class LLMConfigTests(unittest.TestCase):
 
         def fake_call_sdk(self_, vendor, messages, options):
             seen_max_tokens.append(options["max_tokens"])
-            # 第一次报告截断，第二次完整（即使再次截断也不会第三次调用）
-            return ("部分文本", True) if len(seen_max_tokens) == 1 else ("完整文本", False)
+            # 始终报告截断：放大只发生一次，结果直接取自放大调用
+            return ("部分文本", True)
 
         with mock.patch.object(LLMClient, "_call_sdk", fake_call_sdk):
             result = client.chat("sys", "user")
 
-        self.assertEqual(result, "完整文本")
+        self.assertEqual(result, "部分文本")
         self.assertEqual(seen_max_tokens, [4096, 8192])
 
     def test_truncation_escalation_does_not_leak_to_next_vendor(self) -> None:
@@ -446,7 +446,7 @@ class LLMConfigTests(unittest.TestCase):
                 self.assertIn("LLM_DECISION_TEMPERATURE", env_text)
 
     def test_extract_scenario_from_docs_validates_fields(self) -> None:
-        """文档抽取：非法节点类型/越界数值被修正，背景为空时报错。"""
+        """文档抽取：非法节点类型与越界数值被修正、空名节点被过滤；无法识别节点或空文档时报错。"""
         payload = (
             '{"title": "电子产品供应链", "industry": "电子制造", '
             '"background": "以华南制造商为核心的四级供应链。", '
@@ -472,17 +472,17 @@ class LLMConfigTests(unittest.TestCase):
         self.assertEqual(result["baseline_cost"], 0)
         self.assertEqual(result["baseline_service_level"], 1.0)
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "未能从文档识别"):
             llm_analysis.extract_scenario_from_docs(make_json_client("{}"), "文档")
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "没有可供分析"):
             llm_analysis.extract_scenario_from_docs(make_json_client(payload), "")
 
     def test_generate_agent_config_validates_and_truncates(self) -> None:
-        """行为体生成：非法 stance 回退模板默认，7 个行为体齐全，种子事件截断到 3 条。"""
+        """行为体生成：非法 stance 回退模板默认、缺失行为体补全，种子事件截断到 3 条。"""
         agents_config = {
             str(i): {"stance": "aggressive", "activity": 0.5, "influence": 1.0, "profile": f"画像{i}"}
-            for i in range(1, 8)
-        }
+            for i in range(1, 7)
+        }                                              # 缺 id 7：应回落模板补全
         agents_config["1"]["stance"] = "reckless"      # 非法，应回退
         agents_config["2"]["activity"] = 9.9           # 越界，应 clamp
         seeds = [{"content": f"事件{i}", "cycle": i} for i in range(1, 6)]
@@ -499,6 +499,9 @@ class LLMConfigTests(unittest.TestCase):
         template_1 = AgentFactory.get_template(1)
         self.assertEqual(result["agents_config"]["1"]["stance"], template_1["decision_stance"])
         self.assertEqual(result["agents_config"]["2"]["activity"], 1.0)
+        self.assertEqual(
+            result["agents_config"]["7"]["stance"], AgentFactory.get_template(7)["decision_stance"]
+        )
         self.assertEqual(len(result["seed_events"]), 3)
         self.assertEqual(result["seed_events"][0]["content"], "事件1")
 

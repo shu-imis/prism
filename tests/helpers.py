@@ -11,17 +11,9 @@ from llm.prompts import AGENT_RESPONSE_SYSTEM
 def make_fake_llm_client(slow_supplier_seconds: float = 0.0) -> LLMClient:
     def fake_transport(vendor, messages, options):
         system = messages[0]["content"]
-        user_msg = messages[1]["content"] if len(messages) > 1 else ""
         # 注意：system prompt 含全部行为体名单（互动规则），
         # 必须用画像首句识别行为体，不能用「供应商」等泛关键词
         if "你代表政府监管机构" in system:
-            if "风险" in user_msg:
-                return (
-                    '{"inventory_change": 0, "cost_change": 5, "delay_change": 0.5, '
-                    '"service_change": -0.02, "margin_change": -0.04, '
-                    '"pressure_change": 0.05, "risk_description": "存在合规风险需关注", '
-                    '"response_summary": "监管机构关注合规问题", "decision_shift": "toward_defensive"}'
-                )
             return (
                 '{"inventory_change": 0, "cost_change": 0, "delay_change": 0, '
                 '"service_change": 0, "margin_change": 0, '
@@ -99,6 +91,3 @@ class FakeKeyring:
 
     def set_password(self, service: str, username: str, password: str) -> None:
         self.store[(service, username)] = password
-
-    def delete_password(self, service: str, username: str) -> None:
-        del self.store[(service, username)]

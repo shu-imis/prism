@@ -45,7 +45,7 @@ VALID_DECISION_SHIFTS = {
 # 行为体行动空间（MiroFish/OASIS 式受限动作）：LLM 每轮必须从中选择行动类型
 ACTION_TYPES = frozenset(ACTION_TYPE_DEFS)
 
-# 观察层折叠阈值：同一行为体相邻轮次内容相似度超过该值时折叠旧条目
+# 观察层折叠阈值：同一行为体相邻轮次内容相似度超过该值时，后一条折叠为「持续中」
 OBS_COLLAPSE_SIMILARITY = 0.7
 
 
@@ -117,7 +117,6 @@ class AgentTurn:
     agent_id: int
     agent_name: str
     role: str
-    decision_stance: str
     speech: str
     inventory_change: float = 0.0
     cost_change: float = 0.0
@@ -254,7 +253,6 @@ class SimulationEngine:
             # 续传的轮数上界以检查点保存的 max_rounds 为准（保存时刻的配置优先于当前配置）
             max_rounds = int(resume.get("max_rounds") or self.state.config.max_rounds)
             self.state.total_rounds = max_rounds
-            # 续传事件检测器的连续计数，跨断点的「连续两轮」检测链不断裂
             if resume.get("detector"):
                 self._detector = detector = EventDetector.from_dict(resume["detector"])
         else:
@@ -323,7 +321,7 @@ class SimulationEngine:
                             turns.append(turn)
                         else:
                             future.cancel()
-                            turns.append(self._skipped_turn(agent, "本轮超过最大耗时，已跳过。", warning="round_timeout"))
+                            turns.append(self._skipped_turn(agent, "本轮超过最大耗时，已跳过", warning="round_timeout"))
             finally:
                 executor.shutdown(wait=False, cancel_futures=True)
             # 按行为体 ID 排序，保证输出确定性
@@ -372,8 +370,8 @@ class SimulationEngine:
             self._apply_events(next_state, events)
             self._apply_bullwhip_effect(agents)
 
-            # 本轮行动写入共享信息流，供后续轮次的行为体观察（同步更新语义：
-            # 同轮行为体互不可见，反应链跨轮形成，与 MiroFish/OASIS 一致）
+            # 本轮行动写入共享信息流，供后续轮次的观察使用：
+            # 同轮行为体互不可见，反应链跨轮形成
             feed.append(
                 ActionRecord(
                     round=round_index,
@@ -517,7 +515,6 @@ class SimulationEngine:
             agent_id=agent.id,
             agent_name=agent.name,
             role=agent.role,
-            decision_stance=agent.decision_stance,
             speech="",
             skipped=True,
             error_message=error_message,
@@ -530,14 +527,12 @@ class SimulationEngine:
         state: WorldState,
         feed: ActionFeed,
         agents: list[Agent],
-        knowledge_context: str | None = None,
+        knowledge_context: str,
     ) -> AgentTurn:
         scenario = self.state.scenario or Scenario()
         observation = self._build_observation(agent, agents, feed, state)
         own_last = feed.last_entry_for(agent.id)
         other_agents = "、".join(a.name for a in agents if a.id != agent.id)
-        if knowledge_context is None:
-            knowledge_context = self._retrieve_knowledge_context(agent, state)
         system_prompt = self._system_prompt.format(
             agent_profile=agent.profile,
             cycle=state.simulated_hour,
@@ -592,7 +587,7 @@ class SimulationEngine:
         action_type = str(data.get("action_type", "maintain")).strip() or "maintain"
         allowed_actions = AGENT_ALLOWED_ACTIONS.get(agent.id, ACTION_TYPES)
         warning = ""
-        if action_type not in ACTION_TYPES or action_type not in allowed_actions:
+        if action_type not in allowed_actions:
             warning = f"action_type={action_type} 非法或超出角色行动空间，已降级为 maintain"
             action_type = "maintain"
         reaction_to, reaction_warning = self._validate_reaction_to(
@@ -604,7 +599,6 @@ class SimulationEngine:
             agent_id=agent.id,
             agent_name=agent.name,
             role=agent.role,
-            decision_stance=agent.decision_stance,
             speech=str(data.get("response_summary", "")).strip(),
             inventory_change=clamp_float(data.get("inventory_change", 0.0), -20.0, 20.0),
             cost_change=clamp_float(data.get("cost_change", 0.0), -10.0, 15.0),
@@ -780,7 +774,7 @@ class SimulationEngine:
     def _build_observation(self, agent: Agent, agents: list[Agent], feed: ActionFeed, state: WorldState) -> str:
         """构建行为体的个性化观察：供应链邻居行动 + 全链高影响力行动。
 
-        同一行为体相邻轮次内容高度相似时折叠旧条目为「持续中」，
+        同一行为体相邻轮次内容高度相似时，后一条折叠为「持续中」，
         避免模型照抄重复表述（发言同质化的主要诱因）。
         """
         node_states = state.node_states or self._initial_node_states()
@@ -1180,7 +1174,7 @@ class SimulationEngine:
 
     @staticmethod
     def _infer_node_links(node_states: list[NodeState]) -> dict[str, set[str]]:
-        # 主链顺序与 _FALLBACK_TYPE_CHAIN 同源，避免两处各维护一份
+        # 主链顺序取自 _FALLBACK_TYPE_CHAIN
         order_rank = {node_type: rank for rank, node_type in enumerate(_FALLBACK_TYPE_CHAIN)}
         chain_nodes = [node for node in node_states if node.node_type in order_rank]
         chain_nodes.sort(key=lambda node: (order_rank[node.node_type], node.name))

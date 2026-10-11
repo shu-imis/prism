@@ -84,8 +84,8 @@ class WorkspaceServiceTests(unittest.TestCase):
         """导入文档按 source/chunk_index/content 形状分块写入知识库。"""
         project = self._svc.create_project("示例", {})
         docs = [
-            ImportedDocument(path="a.md", title="甲", text="供应波动。" * 300),
-            ImportedDocument(path="b.md", title="乙", text="物流延迟。"),
+            ImportedDocument(path="a.md", text="供应波动。" * 300),
+            ImportedDocument(path="b.md", text="物流延迟。"),
         ]
         self._svc.replace_knowledge_from_docs(project.id, docs)
         chunks = self._svc.knowledge_chunks(project.id)

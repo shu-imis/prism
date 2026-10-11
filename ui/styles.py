@@ -118,7 +118,7 @@ def _scrollbar_qss(bg: str, scope: str = "") -> str:
     margin: 0;
 }}
 {p}QScrollBar::handle:vertical {{
-    background: {rgba(normal)}; border-radius: 0px;
+    background: {rgba(normal)}; border-radius: {RADIUS}px;
     min-height: 20px;
 }}
 {p}QScrollBar::handle:vertical:hover {{ background: {rgba(hover)}; }}
@@ -131,7 +131,7 @@ def _scrollbar_qss(bg: str, scope: str = "") -> str:
     margin: 0;
 }}
 {p}QScrollBar::handle:horizontal {{
-    background: {rgba(normal)}; border-radius: 0px;
+    background: {rgba(normal)}; border-radius: {RADIUS}px;
     min-width: 20px;
 }}
 {p}QScrollBar::handle:horizontal:hover {{ background: {rgba(hover)}; }}
@@ -167,7 +167,7 @@ QMainWindow {{ background: {BG_PAGE}; }}
 #sidebar QPushButton {{
     background: transparent;
     border: none;
-    border-radius: 0px;
+    border-radius: {RADIUS}px;
     text-align: left;
     padding: 6px 12px;
     margin: 1px 8px;
@@ -188,7 +188,7 @@ QMainWindow {{ background: {BG_PAGE}; }}
 #card {{
     background: {BG_SURFACE};
     border: 1px solid {BORDER};
-    border-radius: 0px;
+    border-radius: {RADIUS}px;
 }}
 
 /* ---- 基础组件类（ui/widgets.py 的语义组件，按类名匹配） ---- */
@@ -201,7 +201,7 @@ PopupMenu {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; }}
 #primaryBtn {{
     background: {TEXT_PRIMARY};
     border: none;
-    border-radius: 0px;
+    border-radius: {RADIUS}px;
     color: {TEXT_ON_DARK};
     padding: 5px 14px;
     font-weight: 600;
@@ -213,7 +213,7 @@ PopupMenu {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; }}
 #secondaryBtn {{
     background: {BG_SURFACE};
     border: 1px solid {BORDER};
-    border-radius: 0px;
+    border-radius: {RADIUS}px;
     padding: 4px 13px;
     font-weight: 500;
 }}
@@ -224,7 +224,7 @@ PopupMenu {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; }}
 #ghostBtn {{
     background: transparent;
     border: none;
-    border-radius: 0px;
+    border-radius: {RADIUS}px;
     color: {TEXT_MUTED};
     padding: 4px 10px;
 }}
@@ -234,7 +234,7 @@ PopupMenu {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; }}
 #dangerBtn {{
     background: {COLOR_RED};
     border: none;
-    border-radius: 0px;
+    border-radius: {RADIUS}px;
     color: {TEXT_ON_DARK};
     padding: 5px 14px;
     font-weight: 600;
@@ -247,7 +247,7 @@ PopupMenu {{ background: {BG_SURFACE}; border: 1px solid {BORDER}; }}
 QLineEdit, QTextEdit {{
     background: {BG_INPUT};
     border: 1px solid {BORDER};
-    border-radius: 0px;
+    border-radius: {RADIUS}px;
     padding: 5px 8px;
     color: {TEXT_PRIMARY};
 }}
@@ -259,17 +259,17 @@ QLineEdit:focus, QTextEdit:focus {{
 QSlider::groove:horizontal {{
     background: {BORDER};
     height: 4px;
-    border-radius: 0px;
+    border-radius: {RADIUS}px;
 }}
 QSlider::handle:horizontal {{
     background: {TEXT_PRIMARY};
     width: 12px; height: 12px;
     margin: -4px 0;
-    border-radius: 0px;
+    border-radius: {RADIUS}px;
 }}
 QSlider::handle:horizontal:hover {{ background: {ACCENT}; }}
 QSlider::handle:horizontal:pressed {{ background: {ACCENT_HOVER}; }}
-QSlider::sub-page:horizontal {{ background: {TEXT_PRIMARY}; border-radius: 0px; }}
+QSlider::sub-page:horizontal {{ background: {TEXT_PRIMARY}; border-radius: {RADIUS}px; }}
 
 /* ---- 滚动条（把手颜色由背景亮度自动推导，见 _scrollbar_qss） ---- */
 {_scrollbar_qss(BG_PAGE)}
@@ -328,12 +328,12 @@ def log_view_qss(variant: str = "paper") -> str:
 
 
 def segmented_qss() -> str:
-    """分段按钮组：互斥单选，选中态反色。"""
+    """分段按钮组：选中态反色。"""
     return f"""
     QPushButton {{
         background: {BG_SURFACE};
         border: 1px solid {BORDER};
-        border-radius: 0px;
+        border-radius: {RADIUS}px;
         color: {TEXT_MUTED};
         padding: 3px 12px;
         font-size: 12px;

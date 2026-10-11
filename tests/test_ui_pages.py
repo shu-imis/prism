@@ -33,12 +33,14 @@ class MainWindowSignalRoutingTests(QtDbTestCase):
     """信号接线回归：项目页信号必须路由到工作区（stack 1），回收站是 _go(2)。"""
 
     def test_new_project_signal_goes_to_workspace(self) -> None:
+        """新建项目信号路由到工作区页。"""
         w = self.track(MainWindow())
         w._projects.new_project.emit()
         self.assertEqual(w._stack.currentIndex(), 1)
         self.assertEqual(w._projects._mode, "active")
 
     def test_open_project_signal_goes_to_workspace(self) -> None:
+        """打开项目信号路由到工作区并装载对应项目。"""
         pid = ProjectRepository().create("示例", {}).id
         w = self.track(MainWindow())
         w._projects.open_project.emit(pid)
@@ -47,6 +49,7 @@ class MainWindowSignalRoutingTests(QtDbTestCase):
         self.assertEqual(w._workspace._pid, pid)
 
     def test_open_project_from_trash_mode_goes_to_workspace(self) -> None:
+        """回收站模式下打开项目：进入工作区，项目页模式保持不变。"""
         pid = ProjectRepository().create("示例", {}).id
         w = self.track(MainWindow())
         w._go(2)  # 回收站
@@ -170,6 +173,7 @@ class WorkspaceNavActionTests(QtDbTestCase):
     """Step3 导航主动作跟随仿真页状态：文案与可用性同源。"""
 
     def test_nav_mirrors_simulation_action_state(self) -> None:
+        """暂停、恢复、已完成三档的文案与禁用态逐档跟随。"""
         w = self.track(MainWindow())
         w._go(1)
         w._workspace._step = 2
@@ -185,8 +189,8 @@ class SimulationHistorySpeechTests(QtDbTestCase):
     """发言回填回归：重开项目时日志须从 state_json 还原行为体发言。"""
 
     def test_history_speeches_backfilled(self) -> None:
-        from core.agent_factory import AgentFactory
-        from ui.simulation_page import SimulationPage, _format_speech_line
+        """跳过未发言条目，逐行按固定格式输出。"""
+        from ui.simulation_page import SimulationPage
 
         page = self.track(SimulationPage())
         state = {
@@ -208,13 +212,11 @@ class SimulationHistorySpeechTests(QtDbTestCase):
         }
         page._append_history_speeches(state)
 
-        name1 = AgentFactory.get_template(1)["name"]
-        name2 = AgentFactory.get_template(2)["name"]
         self.assertEqual(
             page._log.toPlainText().splitlines(),
             [
-                _format_speech_line(name1, "adjust_supply", "制造商", "收紧供应。"),
-                _format_speech_line(name2, "replenish", "none", "加快备货。"),
+                "    ↳  原材料供应商【adjust_supply】 回应@制造商：收紧供应。",
+                "    ↳  制造商【replenish】：加快备货。",
             ],
         )
 

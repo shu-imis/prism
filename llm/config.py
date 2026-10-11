@@ -1,7 +1,7 @@
 """全局 LLM 配置管理。
 
 厂商预设、.env 读写、「当前生效厂商」（LLM_ACTIVE_VENDOR）与统一的
-LLMClient 构造入口。仿真、文档分析、画像生成、结果分析等所有 AI
+LLMClient 构造入口。仿真、文档分析、行为体生成、结果分析等所有 AI
 调用点统一从这里取配置。
 
 API Key 属于敏感信息，任何情况下都不明文落盘：
@@ -12,8 +12,8 @@ API Key 属于敏感信息，任何情况下都不明文落盘：
    （enc:v1: 前缀）——属本机绑定加密，安全级别低于钥匙串，但非明文；
 3. 连本机特征也取不到时仅在进程内存中生效，不落盘。
 
-load_vendor_state() 读取厂商配置时若发现 .env 中残留旧格式 Key（明文
-或 enc:v1: 密文）且钥匙串可用，会幂等地迁移进钥匙串并清空 .env。
+load_vendor_state() 读取厂商配置时，若 .env 中存有 Key（明文或 enc:v1:
+密文）且钥匙串可用，会幂等地迁移进钥匙串并清空 .env。
 """
 from __future__ import annotations
 
@@ -246,7 +246,7 @@ def _migrate_secret_to_keyring(env_file: Path, name: str) -> None:
 
 
 def load_vendor_state() -> dict[int, dict[str, str]]:
-    """读取各厂商已保存的 key/url/model（key 优先取钥匙串，旧格式自动迁移）。"""
+    """读取各厂商已保存的 key/url/model（key 优先取钥匙串，.env 中的 Key 自动迁移）。"""
     env_file = _env_path()
     state: dict[int, dict[str, str]] = {}
     for idx, prefix in VENDOR_ENV_PREFIX.items():

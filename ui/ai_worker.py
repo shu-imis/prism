@@ -1,6 +1,6 @@
 """通用 AI 调用工作线程。
 
-Step1 文档分析、Step2 画像生成、Step4 结果分析、设置页连通性测试共用。
+Step1 文档分析、Step2 行为体生成、Step4 结果分析、设置页连通性测试共用。
 在 QThread 中执行传入的 callable，避免阻塞 UI 主线程。
 """
 from PySide6.QtCore import QThread, Signal

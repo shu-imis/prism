@@ -127,7 +127,7 @@ class EventDetector:
             events.append(self._make_event(state, EventType.REGULATORY_INTERVENTION))
             self._regulator_risk_count = 0
 
-        # 5. 需求激增（由调用方判断，传入标志）
+        # 5. 需求激增
         if demand_surge_detected:
             events.append(self._make_event(state, EventType.DEMAND_SURGE))
 

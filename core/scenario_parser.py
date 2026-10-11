@@ -89,7 +89,7 @@ class Scenario:
 
 
 class ScenarioParser:
-    """提供 parse / from_dict 两个构建 Scenario 的入口。"""
+    """提供 parse 构建 Scenario 的入口。"""
 
     @staticmethod
     def parse(

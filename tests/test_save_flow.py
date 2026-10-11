@@ -67,6 +67,39 @@ class SaveFlowTests(unittest.TestCase):
             "commit_invalidate",
         )
 
+    def test_settle_discard_restores_and_continues(self) -> None:
+        """放弃：恢复表单、记日志、发出保存信号，并告知调用方就此结束。"""
+        calls: list = []
+        handled = self._flow.settle(
+            lambda *args, **kwargs: calls.append(("log", args)),
+            "discard",
+            restore=lambda: calls.append("restore"),
+            emit_saved=lambda: calls.append("emit"),
+        )
+        self.assertTrue(handled)
+        self.assertEqual(calls, ["restore", ("log", ("已放弃未保存的修改",)), "emit"])
+
+    def test_settle_defer_and_pass_through(self) -> None:
+        """延后只提示停留原地；commit/skip 不做处理，交给调用方继续保存流程。"""
+        calls: list = []
+
+        def log(*args, **kwargs):
+            calls.append(("log", args))
+
+        def restore() -> None:
+            calls.append("restore")
+
+        def emit_saved() -> None:
+            calls.append("emit")
+
+        self.assertTrue(self._flow.settle(log, "defer", restore=restore, emit_saved=emit_saved))
+        self.assertEqual(calls, [("log", ("本步修改未保存；再点「下一步」将放弃修改并继续",))])
+
+        calls.clear()
+        self.assertFalse(self._flow.settle(log, "commit", restore=restore, emit_saved=emit_saved))
+        self.assertFalse(self._flow.settle(log, "skip", restore=restore, emit_saved=emit_saved))
+        self.assertEqual(calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

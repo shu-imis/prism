@@ -79,7 +79,7 @@ class StatusLabel(QLabel):
 
 
 class SegmentedControl(QWidget):
-    """分段按钮组 — 互斥单选，替代下拉框。"""
+    """分段按钮组 — 互斥单选。"""
 
     valueChanged = Signal(str)
 
@@ -212,7 +212,7 @@ class PopupMenu(QFrame):
 
 
 class ConfirmDialog(QDialog):
-    """应用内确认弹窗 — 替代 QMessageBox，与自绘组件风格一致。
+    """应用内确认弹窗。
 
     结构：内容区（标题 + 说明）+ 1px 分隔线 + 通栏按钮条。确认与通知
     两种形态结构一致；danger=True 时确认按钮红字警示。Esc 或点取消均为拒绝。
@@ -305,8 +305,7 @@ class ConfirmDialog(QDialog):
 class _TipDismissFilter(QObject):
     """全局解散过滤器：提示浮层打开期间，点击或滚动任意位置即关闭。
 
-    常驻安装、永不拦截事件（始终返回 False），浮层关闭时是完全的空转，
-    因此不影响应用内任何控件的交互。
+    常驻安装、永不拦截事件（始终返回 False）。
     """
 
     def eventFilter(self, watched, event):
@@ -320,7 +319,7 @@ class _TipDismissFilter(QObject):
 
 
 class TipLabel(QLabel):
-    """点击查看提示的 QLabel — 替代原生 QToolTip，跨平台外观一致。
+    """点击查看提示的 QLabel。
 
     点击显示浮层；再次点击自身切换关闭；点击/滚动其他任意位置、切页、
     宿主销毁时关闭。全应用同时最多一个浮层（类级管理）。
@@ -439,7 +438,7 @@ class _StepperInput(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self._minus = QPushButton("−")
+        self._minus = QPushButton("－")
         self._minus.setFixedSize(BTN_H, BTN_H)
         self._minus.setCursor(Qt.PointingHandCursor)
         self._minus.setStyleSheet(stepper_button_qss("right"))
@@ -518,11 +517,6 @@ class _StepperInput(QWidget):
         self._input.setText(self._format(self._clamp(val)))
         self._sync_bounds()
 
-    def setRange(self, min_val, max_val):
-        self._min = min_val
-        self._max = max_val
-        self._sync_bounds()
-
 
 class NumberInput(_StepperInput):
     """带加减按钮的整数输入框"""
@@ -537,7 +531,7 @@ class NumberInput(_StepperInput):
 
 
 class ProgressBar(QWidget):
-    """自定义进度条 — QPainter 绘制，macOS 上显示一致"""
+    """自定义进度条 — QPainter 绘制。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -567,7 +561,7 @@ class ProgressBar(QWidget):
             painter.setBrush(QColor(TEXT_PRIMARY))
             painter.drawRect(0, 0, fill_w, h)
 
-        # 文字 — 填充过半时切换为白色
+        # 文字 — 填充超过 45% 时切换为白色
         text = f"{self._value}%"
         font = QFont()
         font.setPointSize(10)
@@ -576,7 +570,6 @@ class ProgressBar(QWidget):
         painter.setPen(QColor(TEXT_ON_DARK if self._value > 45 else TEXT_PRIMARY))
         painter.drawText(QRectF(0, 0, w, h), Qt.AlignCenter, text)
         painter.end()
-
 
 
 class DecimalInput(_StepperInput):

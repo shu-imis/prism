@@ -1,7 +1,7 @@
 """全局设置
 
 与「项目列表」「工作区」平级。
-- LLM 配置：所有 AI 功能（Step1 文档分析、Step2 行为体生成、Step3 仿真、
+- LLM 配置：所有 AI 功能（Step1 文档分析、Step2 行为体生成、Step3 供应链仿真、
   Step4 结果分析）统一使用此处选中的厂商配置。
 - 仿真参数：仿真轮次、行为体决策温度。
 API Key 存入系统钥匙串，其余配置写入 .env，保存后当前进程立即生效。
@@ -24,7 +24,7 @@ from llm.config import (
     persist_env_vars,
     persist_vendor_state,
 )
-from ui.ai_worker import run_ai_task
+from ui.ai_worker import run_ai_task_with_button
 from ui.scroll import SmoothScrollArea
 from ui.styles import (
     COLOR_GREEN,
@@ -63,7 +63,7 @@ class SettingsPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(PAD_LG)
 
-        # --- 页头（与「项目列表」一致，保存为页面级主操作） ---
+        # --- 页头 ---
         hdr = QHBoxLayout()
         hdr.setContentsMargins(PAD_XL, PAD_XL, PAD_XL, 0)
         hdr.addWidget(Title("设置", 18))
@@ -96,12 +96,12 @@ class SettingsPage(QWidget):
         card.add(self._vendor_seg)
 
         card.add(QLabel("API Key"))
-        self._key = Input("API Key")
+        self._key = Input()
         self._key.setEchoMode(QLineEdit.Password)
         card.add(self._key)
 
         card.add(QLabel("Base URL"))
-        self._url = Input("Base URL")
+        self._url = Input()
         card.add(self._url)
 
         card.add(QLabel("模型"))
@@ -231,7 +231,7 @@ class SettingsPage(QWidget):
     def _on_save(self):
         self._save_current_vendor_state()
         ok_vendor = persist_vendor_state(self._vendor_state, active_vendor=self._vendor_index)
-        # 仿真与调用参数：写 .env 并同步当前进程配置（下一次仿真生效）
+        # 仿真与调用参数：写 .env 并同步当前进程配置
         max_rounds = self._sim_rounds.value()
         decision_temperature = round(self._decision_temperature.value(), 2)
         request_timeout = self._request_timeout.value()
@@ -272,19 +272,21 @@ class SettingsPage(QWidget):
             self._key.text().strip(),
             self._url.text().strip() or preset.get("url", "") or None,
         )
-        self._test_btn.setVisible(False)
         self._testing = True
-        self._set_status("测试连接中…")
-        run_ai_task(
+        run_ai_task_with_button(
             self,
+            self._test_btn,
+            self._status,
+            "测试连接中…",
             lambda: check_vendor(settings),
             lambda _reply: self._on_test_done("连接成功，配置可用", False),
             lambda err: self._on_test_done(f"连接失败：{err[:120]}", True),
         )
+        # 进行中状态用中性色
+        self._status.setStyleSheet(settings_status_qss(TEXT_SECONDARY))
 
     def _on_test_done(self, msg: str, is_error: bool):
         self._testing = False
-        self._test_btn.setVisible(True)
         self._set_status(msg, COLOR_RED if is_error else COLOR_GREEN)
 
     def iter_ai_workers(self) -> list:

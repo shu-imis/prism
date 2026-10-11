@@ -16,7 +16,7 @@ from core.constants import STANCES
 from services.ai import CLIENT_UNAVAILABLE_MESSAGE, generate_persona, prepare_client
 from services.workspace import WorkspaceService
 from ui.ai_worker import run_ai_task_with_button
-from ui.save_flow import SaveFlow
+from ui.save_flow import MISSING_PROJECT_MESSAGE, SaveFlow
 from ui.scroll import ChainingTextEdit, SmoothScrollArea
 from ui.styles import (
     PAD_MD,
@@ -53,7 +53,7 @@ class PersonaPage(QWidget):
         self._form_baseline = None
         self._ws = WorkspaceService()
         self._flow = SaveFlow(self)
-        # 终端日志回调：默认空实现，由 WorkspacePage 注入覆盖（单独实例化也能用）
+        # 终端日志回调：由 WorkspacePage 注入
         self.log = lambda *args, **kwargs: None
         self._build()
 
@@ -260,7 +260,6 @@ class PersonaPage(QWidget):
         self.log(f"AI 生成失败：{err}", is_error=True)
 
     def reset(self):
-        self._pid = None
         self.load_project(None)
 
     def save(self):
@@ -304,25 +303,21 @@ class PersonaPage(QWidget):
 
         project = self._ws.load_project(self._pid)
         if not project:
-            # 项目已在首页被删除：不静默吞掉，提示用户重新创建
-            self.log("项目已被删除，请回到首页重新创建或打开其他项目", is_error=True)
+            self.log(MISSING_PROJECT_MESSAGE, is_error=True)
             return
         fields = {"agents_config": agents_config, "seed_events": seed_events}
-        # 与本步载入时的表单比对：识别用户真实编辑，不受库中存储格式影响
         outcome = self._flow.resolve(
             changed=(agents_config, seed_events) != self._form_baseline,
             status=project.status,
             payload=fields,
             confirm_text="行为体或种子事件已变更，该项目的全部仿真轮次、断点与报告将被清除，无法恢复。",
         )
-        if outcome == "discard":
-            # 上次取消保存后未再编辑：确认放弃修改，表单恢复后直接继续
-            self.load_project(self._pid)
-            self.log("已放弃未保存的修改")
-            self.agents_saved.emit(self._pid)
-            return
-        if outcome == "defer":
-            self.log("本步修改未保存；再点「下一步」将放弃修改并继续")
+        if self._flow.settle(
+            self.log,
+            outcome,
+            restore=lambda: self.load_project(self._pid),
+            emit_saved=lambda: self.agents_saved.emit(self._pid),
+        ):
             return
         if outcome != "skip":
             self._ws.commit_save(

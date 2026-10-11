@@ -1,6 +1,6 @@
 """报告导出。
 
-提供 Markdown 格式的报告导出，结构与结果页一致：
+提供 Markdown 格式的报告导出：
 概述、背景、指标变化、指标演化数据、演化时间线、六维评估、风险与建议、
 AI 综合分析（如有）。
 """
@@ -11,7 +11,7 @@ from pathlib import Path
 from core.constants import METRICS
 from core.text_utils import normalize_speech
 from core.world_state import WorldState
-from report.generator import SCORE_KEY_RESILIENCE, SimulationReport
+from report.generator import REPORT_TITLE_SUFFIX, SCORE_KEY_RESILIENCE, SimulationReport
 from report.timeline import AGENT_NAMES, build_timeline_entries, format_rounds_span
 
 
@@ -43,7 +43,7 @@ class ReportExporter:
             (SCORE_KEY_RESILIENCE, f"{resilience:.1f}", "—"),
         )
         lines = [
-            f"# {_inline(report.project_name)} - 供应链演化仿真报告",
+            f"# {_inline(report.project_name)} - {REPORT_TITLE_SUFFIX}",
             "",
             "## 演化概述",
             _inline(report.evolution_summary) or "暂无摘要。",

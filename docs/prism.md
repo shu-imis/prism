@@ -120,7 +120,7 @@ Prism 为单体桌面应用，基于 PySide6 实现全部交互与业务逻辑�
 ```
 ┌──────────────────────────────────────────┐
 │                PySide6 UI                │
-│        projects / process / styles       │
+│        projects / workspace / styles     │
 ├──────────────────────────────────────────┤
 │                业务逻辑层                │
 ├────────────┬────────────┬────────────────┤
@@ -140,7 +140,7 @@ Prism 为单体桌面应用，基于 PySide6 实现全部交互与业务逻辑�
 | LLM 调用 | openai SDK + anthropic SDK | 支持 fallback |
 | 数据存储 | SQLite | 单文件数据库，WAL 模式 |
 | 报告导出 | Markdown | |
-| 配置管理 | python-dotenv + keyring | API Key 优先存操作系统钥匙串，无钥匙串环境以本机密钥加密写入 .env（`enc:v1:`） |
+| 配置管理 | python-dotenv + keyring | API Key 优先存操作系统钥匙串，无钥匙串环境以本机特征派生密钥加密写入 .env（`enc:v1:`） |
 | 文档解析 | 纯文本读取（Markdown / TXT） | RAG 文档导入 |
 
 ---
@@ -194,7 +194,7 @@ Prism 为单体桌面应用，基于 PySide6 实现全部交互与业务逻辑�
 
 ### 5.7 设置（全局配置）
 - 与「项目列表」「工作区」平级的独立设置页
-- LLM 配置：7 组厂商预设（Anthropic / DeepSeek / Kimi / OpenAI / 通义千问 / 智谱 / 自定义，按品牌名字母序），各厂商 API Key/URL/模型独立记忆，切换不丢失
+- LLM 配置：7 组厂商预设（Anthropic / DeepSeek / Kimi / OpenAI / 通义千问 / 智谱 / 自定义，按品牌名字母序），各厂商 API Key/URL/模型独立记忆
 - 当前生效厂商（LLM_ACTIVE_VENDOR）全局统一：Step1/2/3/4 的所有 AI 功能共用
 - 仿真参数：仿真轮次（4~24）、行为体决策温度（0~1，较低更稳定、较高发言更多样）
 - 调用参数：请求超时（5~180 秒，思考型模型可调大）、重试次数（0~5）
@@ -231,7 +231,7 @@ Prism 为单体桌面应用，基于 PySide6 实现全部交互与业务逻辑�
 
 - **共享信息流（ActionFeed）**：每轮行动结构化记录（行为体、行动类型、指标影响、原话、回应对象），是所有互动的中介；行为体之间不直接通信
 - **种子事件（seed_events）**：用户在 Step 02 配置的种子事件，在指定周期以"种子事件"身份写入信息流（全链广播），行为体观察到后反应，干预沿链路传播——对应 MiroFish 的 initial_posts 机制
-- **观察层**：邻居行动全部可见，非邻居行动仅高影响力（≥1.5）广播可见；节点链路缺失时使用兜底主链（供应商→制造商→分销商→零售商→消费者）判定上下游；同一行为体相邻轮次内容高度相似（相似度 ≥0.7）时旧条目折叠为「持续中」，抑制发言复读
+- **观察层**：邻居行动全部可见，非邻居行动仅高影响力（≥1.5）广播可见；节点链路缺失时使用兜底主链（供应商→制造商→分销商→零售商→消费者）判定上下游；同一行为体相邻轮次内容高度相似（相似度 ≥0.7）时后一条折叠为「持续中」，抑制发言复读
 - **行动空间**：`maintain / adjust_supply / adjust_price / adjust_capacity / expedite_logistics / reduce_orders / shift_demand / intervene`，每类行为体仅有子集（如监管只能 maintain/intervene）
 - **同步更新语义**：同轮行为体互不可见，反应链跨一轮形成（与 MiroFish/OASIS 一致）
 - 检查点恢复时信息流从空重建，首轮观察降级为「暂无可观察行动」，随后续轮次恢复
@@ -307,20 +307,21 @@ prism/
 │   ├── simulation.py             # 仿真服务：运行准备与状态收尾
 │   └── ai.py                     # AI 动作服务：业务入口与客户端准备
 ├── tests/
-│   ├── helpers.py                # 共享测试助手
-│   ├── qt_helpers.py             # Qt 离屏测试基建（临时数据库 + 窗口回收）
-│   ├── test_simulation_engine.py # 仿真引擎与检查点/恢复
-│   ├── test_llm_config.py        # LLM 客户端与厂商配置
-│   ├── test_core_modules.py      # 核心模块测试
-│   ├── test_repositories.py      # 数据库 Repository 测试
-│   ├── test_reporting.py         # 报告生成与导出测试
-│   ├── test_report_service.py    # 报告服务测试
-│   ├── test_ui_pages.py          # UI 页面行为测试
-│   ├── test_workspace_pages.py   # 工作区子页面行为测试
-│   ├── test_save_flow.py         # 保存流程状态机测试
-│   ├── test_workspace_service.py # 工作区服务测试
-│   ├── test_simulation_service.py# 仿真服务测试
-│   └── test_scroll.py            # 滚动交互测试
+│   ├── helpers.py                 # 共享测试助手
+│   ├── qt_helpers.py              # Qt 离屏测试基建（临时数据库 + 窗口回收）
+│   ├── test_simulation_engine.py  # 仿真引擎与检查点/恢复
+│   ├── test_llm_config.py         # LLM 客户端与厂商配置
+│   ├── test_core_modules.py       # 核心模块测试
+│   ├── test_repositories.py       # 数据库 Repository 测试
+│   ├── test_reporting.py          # 报告生成与导出测试
+│   ├── test_report_service.py     # 报告服务测试
+│   ├── test_ui_pages.py           # UI 页面行为测试
+│   ├── test_workspace_pages.py    # 工作区子页面行为测试
+│   ├── test_save_flow.py          # 保存流程状态机测试
+│   ├── test_workspace_service.py  # 工作区服务测试
+│   ├── test_simulation_service.py # 仿真服务测试
+│   ├── test_scroll.py             # 滚动交互测试
+│   └── test_title_bar.py          # 标题栏交互测试
 └── docs/
     ├── prism.md                  # 本文档
     └── roadmap.md                # 路线图

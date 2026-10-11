@@ -188,7 +188,7 @@ class LLMClient:
                 except Exception as exc:  # noqa: BLE001 - 第三方 SDK 错误类型不统一
                     failures.append(f"{vendor.vendor.value} attempt {attempt + 1}: {exc}")
                     # 错误分类（OpenAI/Anthropic SDK 的 APIStatusError 均带 status_code）：
-                    # 4xx 永久性错误重试无意义，直接 break 切换下一个厂商；
+                    # 鉴权/参数类 4xx（400/401/403/404/422）属永久性错误，直接 break 切换下一个厂商；
                     # SDK 未安装（RuntimeError 包装 ImportError）同为永久性错误
                     if getattr(exc, "status_code", None) in (400, 401, 403, 404, 422):
                         break

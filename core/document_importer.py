@@ -16,7 +16,6 @@ DEFAULT_CHUNK_OVERLAP = 120
 @dataclass(frozen=True)
 class ImportedDocument:
     path: str
-    title: str
     text: str
 
 
@@ -38,14 +37,14 @@ def import_documents(paths: list[str | Path], max_total_chars: int = MAX_IMPORT_
         if not path.is_file():
             raise ValueError(f"文件不存在或已被移动: {path.name}")
         if path.stat().st_size > MAX_IMPORT_FILE_BYTES:
-            raise ValueError(f"文件过大: {path.name}，单个文件最多 10MB")
+            raise ValueError(f"文件过大: {path.name}，单个文件最多 {MAX_IMPORT_FILE_BYTES // (1024 * 1024)}MB")
 
         text = _read_document_text(path)
         text = _normalize_text(text)
         if not text:
             continue
         clipped = text[:remaining]
-        imported.append(ImportedDocument(str(path), path.name, clipped))
+        imported.append(ImportedDocument(str(path), clipped))
         remaining -= len(clipped)
     return imported
 

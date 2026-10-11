@@ -12,7 +12,7 @@ from db.models import (
     SimulationRoundRepository,
 )
 from report.exporter import ReportExporter
-from report.generator import ReportGenerator, SimulationReport
+from report.generator import REPORT_TITLE_SUFFIX, ReportGenerator, SimulationReport
 
 
 class ReportService:
@@ -45,7 +45,7 @@ class ReportService:
         """更新项目主报告，无则插入；标题、Markdown 与摘要一并写入。"""
         ReportRepository().save_or_update_latest(
             project_id=project_id,
-            title=f"{report.project_name} - 供应链演化仿真报告",
+            title=f"{report.project_name} - {REPORT_TITLE_SUFFIX}",
             markdown=ReportExporter.to_markdown(report, rounds),
             summary=report.to_dict(),
         )

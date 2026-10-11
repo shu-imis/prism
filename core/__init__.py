@@ -17,7 +17,7 @@ def clamp_float(
     """安全地将任意值解析为 float 并限制范围内；解析失败返回 default。"""
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: float(超大整数)
         return default
     return clamp(parsed, lower, upper)
 

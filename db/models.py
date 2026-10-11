@@ -498,7 +498,7 @@ def invalidate_simulation_results(project_id: int, db: Database | None = None) -
     """作废旧仿真结果：场景或行为体配置变更后，历史仿真数据不再有效。
 
     删除主仿真轮次、检查点与报告，并把项目状态
-    回退为 draft，供 Step1/Step2 保存时在 completed/interrupted 项目上调用。
+    回退为 draft，供 Step1/Step2 保存与仿真重置调用。
     全部改动在单一事务内提交，避免部分生效的中间态。
     """
     db = db or Database()
@@ -548,7 +548,12 @@ class KnowledgeRepository:
                     ),
                 )
                 ids.append(int(cursor.lastrowid))
-        return [self.get_by_id(chunk_id) for chunk_id in ids]
+        chunks: list[KnowledgeChunk] = []
+        for chunk_id in ids:
+            chunk = self.get_by_id(chunk_id)
+            if chunk is not None:
+                chunks.append(chunk)
+        return chunks
 
     def get_by_id(self, chunk_id: int) -> KnowledgeChunk | None:
         row = self.db.conn.execute(

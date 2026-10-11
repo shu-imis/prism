@@ -9,7 +9,7 @@ from unittest import mock
 from config import app_config
 from core.action_feed import ActionFeed, ActionRecord
 from core.scenario_parser import ScenarioParser
-from core.simulation_engine import AgentTurn, SimulationEngine
+from core.simulation_engine import AgentTurn, SimulationEngine, SimulationRecoverableError
 from core.world_state import WorldState
 from db.database import Database
 from db.models import (
@@ -30,18 +30,16 @@ class SimulationEngineTests(unittest.TestCase):
             agent_id=1,
             agent_name="原材料供应商",
             role="上游供应商",
-            decision_stance="cautious",
             speech="收紧供应承诺",
             response_summary="收紧供应承诺",
         )
         d = turn.to_dict()
         self.assertEqual(d["agent_name"], "原材料供应商")
         self.assertEqual(d["speech"], "收紧供应承诺")
+        self.assertEqual(d["action_type"], "maintain")
+        self.assertEqual(d["reaction_to"], "none")
+        self.assertEqual(set(d), {"agent_name", "speech", "action_type", "reaction_to", "metrics"})
         self.assertEqual(set(d["metrics"]), {"skipped", "error_message", "warning"})
-        self.assertNotIn("agent_id", d)
-        self.assertNotIn("stance", d)
-        self.assertNotIn("role", d)
-        self.assertNotIn("decision_stance", d)
 
     def test_simulation_engine_runs_llm_rounds_and_events(self) -> None:
         """验证仿真引擎 LLM 多轮运行和事件检测。"""
@@ -140,7 +138,7 @@ class SimulationEngineTests(unittest.TestCase):
         self.assertTrue(any(not message["metrics"]["skipped"] for message in flat_messages))
 
     def test_simulation_engine_all_agent_failure_saves_checkpoint(self) -> None:
-        """验证首轮全部行为体失败时抛致命异常，后续轮次失败时可恢复。"""
+        """验证首轮全部行为体失败时抛致命异常，且初始检查点保留。"""
         with tempfile.TemporaryDirectory() as tmp:
             db = Database(Path(tmp) / "prism.db")
             db.migrate()
@@ -170,8 +168,9 @@ class SimulationEngineTests(unittest.TestCase):
                 checkpoint_repository=checkpoint_repo,
             )
 
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(RuntimeError) as ctx:
                 engine.run()
+            self.assertNotIsInstance(ctx.exception, SimulationRecoverableError)
             # 首轮开始前已写入初始状态检查点，致命失败后仍存在
             self.assertIsNotNone(checkpoint_repo.latest_for_project(project.id))
             db.close()
@@ -477,7 +476,7 @@ class SimulationEngineTests(unittest.TestCase):
         self.assertEqual(len(manufacturer_systems), 2)
         self.assertNotIn("供应商收紧供应承诺", manufacturer_systems[0])
         self.assertIn("供应商收紧供应承诺", manufacturer_systems[1])
-        self.assertIn("上游", manufacturer_systems[1])
+        self.assertIn("上游·", manufacturer_systems[1])
 
     def test_seed_events_injected_into_observation(self) -> None:
         """验证种子事件在指定轮次注入信息流，当轮起即可被行为体观察。"""
@@ -607,7 +606,7 @@ class SimulationEngineTests(unittest.TestCase):
         self.assertEqual(by_name["分销商"]["metrics"]["warning"], "")
 
     def test_observation_collapses_repeated_actions(self) -> None:
-        """观察层：同一行为体相邻轮次内容高度相似时折叠旧条目为「持续中」。"""
+        """观察层：同一行为体相邻轮次内容高度相似时后一条折叠为「持续中」。"""
         engine = SimulationEngine(llm_client=make_fake_llm_client(), random_seed=1)
         agents = make_always_active_agents()
         configure_engine(
@@ -633,7 +632,7 @@ class SimulationEngineTests(unittest.TestCase):
         observation = engine._build_observation(manufacturer, agents, feed, WorldState())
 
         self.assertIn("持续中", observation)
-        self.assertEqual(observation.count(repeated), 1)  # 旧条目被折叠，只出现一次
+        self.assertEqual(observation.count(repeated), 1)  # 后一条折叠为「持续中」，原文只出现一次
 
         # 内容差异大时不折叠
         feed2 = ActionFeed()

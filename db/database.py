@@ -10,7 +10,7 @@ from config import DB_PATH
 
 # Schema 声明：迁移的唯一事实来源，任意旧库启动时向此收敛。
 # 规则：缺表建表、缺列补列、声明外的表/列剔除、结构不符带数据重建。
-# 列改名与语义变更不在自动收敛范围（会误判成删旧增新丢数据），须显式迁移。
+# 列改名与语义变更不参与自动收敛，须显式迁移。
 _SCHEMA: dict[str, dict[str, Any]] = {
     "projects": {
         "columns": {
@@ -95,7 +95,6 @@ _SCHEMA: dict[str, dict[str, Any]] = {
 
 _INDEXES: dict[str, str] = {
     "idx_simulations_project_id": "simulations(project_id)",
-    "idx_rounds_simulation_id": "simulation_rounds(simulation_id, round_index)",
     "idx_checkpoints_project_id": "checkpoints(project_id)",
     "idx_reports_project_id": "reports(project_id)",
     "idx_knowledge_project_id": "knowledge_chunks(project_id)",
@@ -141,7 +140,7 @@ class Database:
     """SQLite 数据库管理器。
 
     实例语义按参数分裂：不传 db_path 返回应用默认库的全局单例；
-    传入 db_path（测试或脚本场景，避免污染本地数据）则每次构造独立新实例。
+    传入 db_path 则每次构造独立新实例。
     """
 
     _default_instance: Database | None = None

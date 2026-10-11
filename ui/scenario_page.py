@@ -30,7 +30,7 @@ from core.scenario_parser import (
 from services.ai import CLIENT_UNAVAILABLE_MESSAGE, extract_scenario, prepare_client
 from services.workspace import WorkspaceService
 from ui.ai_worker import run_ai_task_with_button
-from ui.save_flow import SaveFlow
+from ui.save_flow import MISSING_PROJECT_MESSAGE, SaveFlow
 from ui.scroll import ChainingTextEdit, SmoothScrollArea
 from ui.styles import (
     PAD_MD,
@@ -198,7 +198,7 @@ class ScenarioPage(QWidget):
         self._form_baseline = None
         self._ws = WorkspaceService()
         self._flow = SaveFlow(self)
-        # 终端日志回调：默认空实现，由 WorkspacePage 注入覆盖（单独实例化也能用）
+        # 终端日志回调：由 WorkspacePage 注入
         self.log = lambda *args, **kwargs: None
         self._build()
 
@@ -231,8 +231,8 @@ class ScenarioPage(QWidget):
         card.add(self._bg)
 
         card.add(Caption(
-            f"可导入Markdown/TXT，最多{MAX_IMPORT_FILES}个文件，"
-            f"{MAX_IMPORT_TOTAL_CHARS}字"
+            f"可导入 Markdown / TXT，最多 {MAX_IMPORT_FILES} 个文件、"
+            f"{MAX_IMPORT_TOTAL_CHARS} 字"
         ))
         btn_row = QHBoxLayout()
         self._import_btn = SecondaryBtn("导入背景文档")
@@ -525,24 +525,20 @@ class ScenarioPage(QWidget):
         if self._pid:
             project = self._ws.load_project(self._pid)
             if project is None:
-                # 项目已在首页被删除：不保存、不崩，提示用户重新创建
-                self.log("项目已被删除，请回到首页重新创建或打开其他项目", is_error=True)
+                self.log(MISSING_PROJECT_MESSAGE, is_error=True)
                 return
-            # 与本步载入时的表单比对：识别用户真实编辑，不受库中存储格式影响
             outcome = self._flow.resolve(
                 changed=form != self._form_baseline,
                 status=project.status,
                 payload=form,
                 confirm_text="场景已变更，该项目的全部仿真轮次、断点与报告将被清除，无法恢复。",
             )
-            if outcome == "discard":
-                # 上次取消保存后未再编辑：确认放弃修改，表单恢复后直接继续
-                self._fill_form(project.scenario)
-                self.log("已放弃未保存的修改")
-                self.project_saved.emit(self._pid)
-                return
-            if outcome == "defer":
-                self.log("本步修改未保存；再点「下一步」将放弃修改并继续")
+            if self._flow.settle(
+                self.log,
+                outcome,
+                restore=lambda: self._fill_form(project.scenario),
+                emit_saved=lambda: self.project_saved.emit(self._pid),
+            ):
                 return
             if outcome != "skip":
                 self._ws.commit_save(

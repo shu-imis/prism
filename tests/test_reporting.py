@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from core.world_state import AgentSnapshot, KeyEvent, WorldState
-from llm.client import LLMClient, LLMVendor, VendorSettings
+from llm.client import LLMClient, LLMError, LLMVendor, VendorSettings
 import llm.analysis as llm_analysis
 from report.exporter import ReportExporter
 from report.generator import ReportGenerator, SimulationReport, recommend, recommendation_level
@@ -183,7 +183,7 @@ class ReportingTests(unittest.TestCase):
             max_retries=0,
             transport=failing_transport,
         )
-        with self.assertRaises(Exception):
+        with self.assertRaises(LLMError):
             llm_analysis.analyze_evolution(failing_client, report, [])
 
 

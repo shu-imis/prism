@@ -21,7 +21,7 @@ from db.models import (
 
 class RepositoryTests(unittest.TestCase):
     def test_database_repositories_round_trip(self) -> None:
-        """验证 Project/Simulation/SimulationRound/Report 四个 Repository 的增删改查。"""
+        """验证 Project/Simulation/SimulationRound/Report 四个 Repository 的创建、更新与回读。"""
         with tempfile.TemporaryDirectory() as tmp:
             db = Database(Path(tmp) / "prism.db")
             db.migrate()
@@ -100,7 +100,7 @@ class RepositoryTests(unittest.TestCase):
             self.assertEqual(len(repo.list_by_project(project.id)), 2)
             self.assertEqual(hits[0].source, "a.md")
 
-            # 空列表替换 = 清空知识库（设置页/Step1 清空入口依赖此语义）
+            # 空列表替换 = 清空知识库（Step1 清空入口依赖此语义）
             repo.replace_for_project(project.id, [])
             self.assertEqual(repo.list_by_project(project.id), [])
             db.close()

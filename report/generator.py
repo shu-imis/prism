@@ -11,8 +11,11 @@ from typing import Any
 from core.world_state import WorldState
 from core import clamp
 
-# 六维评估中「风险抵御」的评分键：exporter 引用同一常量，避免硬编码字符串漂移
+# 六维评估中「风险抵御」的评分键，导出层引用此常量
 SCORE_KEY_RESILIENCE = "风险抵御"
+
+# 报告标题后缀，数据库标题与 Markdown 一级标题共用
+REPORT_TITLE_SUFFIX = "供应链演化仿真报告"
 
 
 @dataclass
@@ -204,7 +207,7 @@ def recommendation_level(text: str) -> str:
     """结论/建议文案的语义分级：ok / warn / risk。
 
     文案子串判定规则的单一实现，供结果页上色等消费方复用；
-    与 _RECOMMENDATION_TEXTS 的标准文案保持一致（测试覆盖）。
+    与 _RECOMMENDATION_TEXTS 的标准文案保持一致。
     """
     if "健康" in text or "可参照" in text:
         return "ok"

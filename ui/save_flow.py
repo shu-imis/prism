@@ -6,8 +6,12 @@
 from __future__ import annotations
 
 import json
+from typing import Callable
 
 from ui.widgets import ConfirmDialog
+
+# 保存时项目已被删除的提示文案
+MISSING_PROJECT_MESSAGE = "项目已被删除，请回到首页重新创建或打开其他项目"
 
 
 class SaveFlow:
@@ -37,7 +41,10 @@ class SaveFlow:
         payload: dict,
         confirm_text: str,
     ) -> str:
-        """判定本次保存的去向，返回值语义见类说明。"""
+        """判定本次保存的去向，返回值语义见类说明。
+
+        changed 由调用方以「当前表单与载入时表单的比对」得出，不受库中存储格式影响。
+        """
         if not changed:
             self._discard_snapshot = None
             return "skip"
@@ -59,3 +66,21 @@ class SaveFlow:
             return "defer"
         self._discard_snapshot = None
         return "commit_invalidate"
+
+    def settle(
+        self,
+        log: Callable[..., None],
+        outcome: str,
+        restore: Callable[[], None],
+        emit_saved: Callable[[], None],
+    ) -> bool:
+        """处理判定后的 discard / defer 分支；返回 True 表示本次保存到此为止。"""
+        if outcome == "discard":
+            restore()
+            log("已放弃未保存的修改")
+            emit_saved()
+            return True
+        if outcome == "defer":
+            log("本步修改未保存；再点「下一步」将放弃修改并继续")
+            return True
+        return False

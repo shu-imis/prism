@@ -20,7 +20,7 @@ class Agent:
     influence: float                       # 单次决策对世界状态的影响力权重
     activity: float                        # 每轮被激活的概率（0~1）
     pressure: float = 0.0                  # 当前压力水平（0~1）
-    capacity: float = 1.0                  # 产能利用率（0~1）
+    capacity: float = 1.0                  # 产能利用率（引擎钳制 0.3~1.5）
     active_cycles: list[int] = field(default_factory=list)  # 活跃周期
     profile: str = ""                      # 角色画像（System Prompt）
 

@@ -135,6 +135,25 @@ class CoreModuleTests(unittest.TestCase):
         events = restored.detect(WorldState(round=2, simulated_hour=2), supplier_delayed=True)
         self.assertTrue(any("断供" in event.description for event in events))
 
+    def test_event_detector_remaining_chains(self) -> None:
+        """价格战、监管介入与需求激增的触发链。"""
+        detector = EventDetector()
+        events = detector.detect(
+            WorldState(round=1, simulated_hour=1, profit_margin=-0.1),
+            retailer_margin_negative=True,
+            demand_surge_detected=True,
+        )
+        self.assertEqual(sorted(e.event_type for e in events), ["demand_surge", "price_war"])
+
+        # 监管介入：单轮标记不触发，连续 2 轮触发
+        detector = EventDetector()
+        self.assertEqual(
+            detector.detect(WorldState(round=1, simulated_hour=1), regulator_risk_flagged=True),
+            [],
+        )
+        events = detector.detect(WorldState(round=2, simulated_hour=2), regulator_risk_flagged=True)
+        self.assertEqual([e.event_type for e in events], ["regulatory_intervention"])
+
     def test_event_detector_overflow_cooldown(self) -> None:
         """爆仓事件触发后冷却 2 轮：连续高库存不重复触发，冷却后恢复。"""
         detector = EventDetector()
@@ -222,7 +241,7 @@ class CoreModuleTests(unittest.TestCase):
         self.assertEqual(feed.last_entry_for(2).content, "制造商上轮发言内容")
         self.assertIsNone(feed.last_entry_for(3))
 
-        # 端到端：第 2 轮制造商的 system prompt 包含其上轮发言与互动规则
+        # 端到端：第 2 轮制造商的 system prompt 包含其上轮发言
         seen_systems: list[str] = []
 
         def fake_transport(vendor, messages, options):
@@ -252,8 +271,6 @@ class CoreModuleTests(unittest.TestCase):
         self.assertEqual(len(manufacturer_systems), 2)
         self.assertIn("（首轮，暂无上轮发言）", manufacturer_systems[0])
         self.assertIn("本轮新发言", manufacturer_systems[1])
-        self.assertIn("不可回应", manufacturer_systems[1])
-        self.assertIn("禁止编造具体数量", manufacturer_systems[1])
 
     def test_agent_factory_apply_overrides(self) -> None:
         """验证按行为体 id 的性格覆盖生效，未覆盖行为体保持模板默认。"""

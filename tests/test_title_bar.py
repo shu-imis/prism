@@ -39,9 +39,10 @@ class MacTrafficHoverTests(QtDbTestCase):
         with mock.patch.object(title_bar, "QCursor", _FakeCursor):
             self.assertTrue(hovered_at(6, 6))     # 红点圆心
             self.assertTrue(hovered_at(16, 6))    # 一、二颗之间的空隙
-            self.assertTrue(hovered_at(26, 6))    # 二、三颗之间的空隙
+            self.assertTrue(hovered_at(36, 6))    # 二、三颗之间的空隙
             self.assertFalse(hovered_at(53, 6))   # 胶囊右端之外
             self.assertFalse(hovered_at(26, 14))  # 胶囊下方之外
+            self.assertTrue(hovered_at(6, 6))     # 重新进入悬停，验证清除真实生效
             bar._apply_hover(None)
             self.assertFalse(any(b._group_hover for b in bar._mac_buttons))
 
@@ -53,3 +54,7 @@ class WindowButtonFocusTests(QtDbTestCase):
         buttons = bar._mac_buttons or bar._win_buttons
         self.assertTrue(buttons)
         self.assertTrue(all(b.focusPolicy() == Qt.NoFocus for b in buttons))
+
+
+if __name__ == "__main__":
+    unittest.main()
